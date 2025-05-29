@@ -29,6 +29,26 @@ export class ExampleClass {
     d: number[];
 
     /**
+     * A static string property of the ExampleClass.
+     * @example "static example"
+     * @static
+     */
+    static e: string;
+
+    /**
+     * A read-only number property of the ExampleClass.
+     * @example 100
+     */
+    readonly f: number;
+
+    /**
+     * A static readonly two-dimensional array of strings property of the ExampleClass.
+     * @example [["a", "b"], ["c", "d"]]
+     * @deprecated This property is deprecated and will be removed in future versions.
+     */
+    static readonly g: string[][];
+
+    /**
      * An example constructor for the ExampleClass.
      * @param a A string parameter for the constructor.
      */
@@ -59,6 +79,13 @@ export class ExampleClass {
      * @returns A promise that resolves to a string.
      */
     method4(): Promise<string>
+
+    /**
+     * A static method that takes two parameters and returns a boolean.
+     * @param param1 A string parameter for the static method.
+     * @param param2 A number parameter for the static method.
+     */
+    static method5(param1: string, param2: number): boolean;
 }
 
 /**

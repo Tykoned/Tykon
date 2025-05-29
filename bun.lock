@@ -10,6 +10,7 @@
         "@babel/core": "^7.27.1",
         "@babel/preset-env": "^7.27.2",
         "@babel/preset-typescript": "^7.27.1",
+        "@cloudflare/workers-types": "^4.20250529.0",
         "@jest/globals": "^29.7.0",
         "@types/bun": "latest",
         "@types/jest": "^29.5.14",
@@ -236,6 +237,8 @@
     "@babel/types": ["@babel/types@7.27.1", "", { "dependencies": { "@babel/helper-string-parser": "^7.27.1", "@babel/helper-validator-identifier": "^7.27.1" } }, "sha512-+EzkxvLNfiUeKMgy/3luqfsCWFRXLb7U6wNQTk60tovuckwB15B191tJWvpp4HjiQWdJkCxO3Wbvc6jlk3Xb2Q=="],
 
     "@bcoe/v8-coverage": ["@bcoe/v8-coverage@0.2.3", "", {}, "sha512-0hYQ8SB4Db5zvZB4axdMHGwEaQjkZzFjQiN9LVYvIFB2nSUHW9tYpxWriPrWDASIxiaXax83REcLxuSdnGPZtw=="],
+
+    "@cloudflare/workers-types": ["@cloudflare/workers-types@4.20250529.0", "", {}, "sha512-l6tVFpI6MUChMD0wK+Jhikb+aCbrmIR58CVpV/BhRT4THjl+nFhTT5N5ZqX42FDXdE3hCPLjueBMpPRhPUOB2A=="],
 
     "@gerrit0/mini-shiki": ["@gerrit0/mini-shiki@3.4.2", "", { "dependencies": { "@shikijs/engine-oniguruma": "^3.4.2", "@shikijs/langs": "^3.4.2", "@shikijs/themes": "^3.4.2", "@shikijs/types": "^3.4.2", "@shikijs/vscode-textmate": "^10.0.2" } }, "sha512-3jXo5bNjvvimvdbIhKGfFxSnKCX+MA8wzHv55ptzk/cx8wOzT+BRcYgj8aFN3yTiTs+zvQQiaZFr7Jce1ZG3fw=="],
 

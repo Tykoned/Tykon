@@ -1,11 +1,16 @@
 export type TykonConfig = {
     /**
+     * The module name for the generated code. Defaults to the name of the current directory.
+     * @example `is-sorted`
+     */
+    module?: string;
+    /**
      * The newline string to use in the generated code.
      * Defaults to `\n`.
      */
     newLine?: string;
     /**
-     * The name of the Tykon project.
+     * The package name for the generated code.
      */
     package: string;
     /**
