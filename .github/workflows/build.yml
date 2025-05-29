@@ -13,6 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     name: Build Project
 
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +32,11 @@ jobs:
     needs: build
     name: Deploy JSDoc
     if: ${{ github.event_name != 'pull_request' && github.ref_name == 'master' }}
+
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
 
     steps:
     - uses: actions/checkout@v4
