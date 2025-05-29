@@ -5,7 +5,7 @@
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target node --production",
     "test": "jest",
-    "doc": "bunx typedoc src/index.ts --out docs --plugin typedoc-github-theme --excludePrivate --excludeProtected"
+    "doc": "bunx typedoc src/index.ts --entryPointStrategy Expand src --out docs --plugin typedoc-github-theme --excludePrivate --excludeProtected"
   },
   "module": "src/index.ts",
   "type": "module",
