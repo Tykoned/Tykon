@@ -1,0 +1,40 @@
+name: Build Project
+
+on:
+  push:
+    branches: [ master, ver/* ]
+  pull_request:
+    branches: [ master, ver/* ]
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build Project
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: oven-sh/setup-bun@v2
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+      - name: Run Tests
+        run: bun run test
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    name: Deploy JSDoc
+    if: ${{ github.event_name != 'pull_request' && github.ref_name == 'master' }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+    - uses: oven-sh/setup-bun@v2
+    - name: Generate JSDoc
+      run: bun run doc
+    - name: Deploy
+      run: bash jsdoc.sh ${GITHUB_SHA::7}
