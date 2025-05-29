@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+        "lib": ["ESNext"],
+        "target": "ESNext",
+        "moduleResolution": "node10",
+        "moduleDetection": "auto",
+        "strict": true,
+        "skipLibCheck": true,
+        "rootDir": "src",
+        "outDir": "dist" 
+    },
+    "include": ["src"]
+}
