@@ -1,4 +1,4 @@
-import { ClassDeclaration, FunctionDeclaration, InterfaceDeclaration, ModifierableNode, ModuleDeclaration, SourceFile, StatementedNode, TypeAliasDeclaration, VariableDeclaration, VariableStatement } from "ts-morph";
+import { ClassDeclaration, FunctionDeclaration, InterfaceDeclaration, ModifierableNode, ModuleDeclaration, Node, SourceFile, StatementedNode, TypeAliasDeclaration, VariableDeclaration, VariableStatement } from "ts-morph";
 import { TykonConfig } from "./config";
 import * as utils from "./utils";
 
@@ -35,12 +35,14 @@ function createMethods(declaration: ClassDeclaration | InterfaceDeclaration, con
         // Skip static methods
         if (method instanceof ModifierableNode && (method as ModifierableNode).getModifiers().some(mod => mod.getText() === 'static')) continue;
 
-        const methodName = method.getName();
+        const methodName = utils.findName(method);
+        if (methodName.startsWith('__')) continue; // Skip private methods (convention)
+
         const returnType = utils.convertToKotlinType(method.getReturnType().getText());
         const params = method.getParameters().map(param => {
-            const paramName = param.getName();
+            const paramName = utils.findName(param);
             const paramType = utils.convertToKotlinType(param.getType().getText());
-            const isOptional = param.getType().isNullable() ? '?' : '';
+            const isOptional = param.isOptional() ? '?' : '';
             return `${paramName}: ${paramType}${isOptional}`;
         }).join(', ');
 
@@ -206,7 +208,7 @@ function generateInterface(declaration: InterfaceDeclaration, config: TykonConfi
     let output = "";
     const nl = config.newLine || '\n';
 
-    // Handle class type parameters
+    // Handle interface type parameters
     const typeParams = declaration.getTypeParameters();
     let generics = "";
     let constraints: string[] = [];
@@ -222,7 +224,7 @@ function generateInterface(declaration: InterfaceDeclaration, config: TykonConfi
         }
     }
 
-    // Handle class inheritance
+    // Handle interface inheritance
     const parents = declaration.getExtends();
     const parent0 = parents.length > 0 ? ` : ${parents.map(p => p.getText()).join(', ')}` : '';
 
@@ -244,6 +246,50 @@ function generateInterface(declaration: InterfaceDeclaration, config: TykonConfi
 
     return output;
 }
+
+function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfig): string {
+    if (!declaration.isAmbient()) throw new Error("Only ambient type aliases are supported");
+
+    const nl = config.newLine || '\n';
+    const indent = config.tabs ? '\t'.repeat(config.tabs) : ' '.repeat(config.spaces || 4);
+
+    const name = declaration.getName();
+    const type = declaration.getType();
+    const typeText = type.getText();
+    const typeParams = declaration.getTypeParameters();
+    const generics = typeParams.length > 0 ? `<${typeParams.map(tp => tp.getName()).join(', ')}>` : '';
+
+    const doc = utils.getJsDoc(declaration, nl);
+
+    // If it's a union or something not object-like, fallback to typealias with Any
+    if (!type.isObject() || type.isUnion()) {
+        return `${doc}typealias ${name}${generics} = dynamic /* ${typeText} */${nl}${nl}`;
+    }
+
+    const properties = type.getProperties();
+
+    // Convert to Kotlin interface
+    let output = `${doc}external interface ${name}${generics} {${nl}`;
+    for (const prop of properties) {
+        const declarations = prop.getDeclarations();
+        const propDecl = declarations[0];
+        if (!Node.isPropertySignature(propDecl)) continue;
+
+        const propName = prop.getName();
+        if (propName.startsWith('__')) continue; // Skip private properties (convention)
+
+        const propType = propDecl.getType().getText();
+        const isOptional = propDecl.hasQuestionToken();
+        const kotlinType = utils.convertToKotlinType(propType);
+        const propDoc = utils.getJsDoc(propDecl, nl, indent);
+
+        output += `${propDoc}${indent}var ${propName}: ${kotlinType}${isOptional ? "?" : ""}${nl}`;
+    }
+
+    output += `}${nl}${nl}`;
+    return output;
+}
+
 
 // Main Export Function
 
@@ -284,9 +330,20 @@ function tykon(config: TykonConfig, source: StatementedNode): string {
         output += generateInterface(iface, config) + nl;
     }
 
+    // types
+    for (const typeAlias of source.getTypeAliases().filter(t => t.isAmbient())) {
+        output += generateTypeAlias(typeAlias, config) + nl;
+    }
+
     return output;
 }
 
+/**
+ * Generates Kotlin code from a TypeScript module declaration.
+ * @param config The configuration for Tykon.
+ * @param module The TypeScript module declaration to convert.
+ * @returns The generated Kotlin code as a string.
+ */
 export function tykonFromModule(config: TykonConfig, module: ModuleDeclaration): string {
     let output = "";
     if (!config.imports) {
@@ -307,20 +364,81 @@ export function tykonFromModule(config: TykonConfig, module: ModuleDeclaration):
     return output;
 }
 
-export function tykonFromSource(config: TykonConfig, sourceFile: SourceFile): string {
-    let output = "";
-    output += `// Generated by Tykon from ${sourceFile.getBaseName()}${config.newLine || '\n'}`;
+function getValidFileName(moduleName: string): string {
+    // Remove quotes if present
+    if (moduleName.startsWith('"') && moduleName.endsWith('"')) {
+        moduleName = moduleName.slice(1, -1);
+    }
 
+    // Lowercase, replace ':' with '-', remove invalid chars, trim trailing '-'
+    let fileName = moduleName
+        .toLowerCase()
+        .replace(/:/g, '-')
+        .replace(/[^a-z0-9_-]/g, '')
+        .replace(/-+$/, '');
+    
+    return fileName;
+}
+
+/**
+ * Generates Kotlin code from a TypeScript source file.
+ * @param config The configuration for Tykon.
+ * @param sourceFile The TypeScript source file to convert.
+ * @returns The generated Kotlin code as a map of file names to code strings.
+ */
+export function tykonFromSource(config: TykonConfig, sourceFile: SourceFile): Map<string, string> {
+    let outputs = new Map<string, string>();
+    const nl = config.newLine || '\n';
+
+    const rootModule = config.module || sourceFile.getFilePath().replace(/\.d\.ts$/, '').replace(/.*\//, '');
+    const baseName = sourceFile.getBaseName();
     const modules = sourceFile.getModules();
+
     if (modules.length > 0) {
-        for (const module of modules) output += tykonFromModule(config, module);
+        for (const module of modules) {
+            const moduleName = module.getName();
+            let output = `// Generated by Tykon from ${baseName}${nl}`;
+
+            output += tykonFromModule(config, module);
+            outputs.set(`${getValidFileName(moduleName)}.d.kt`, output);
+        }
+
+        const topLevelStatements = sourceFile.getStatements().filter(s => !Node.isModuleDeclaration(s));
+        if (topLevelStatements.length > 0) {
+            let output = `// Generated by Tykon from ${baseName}${nl}${nl}`;
+
+            output += `@file:JsModule("${rootModule}")${nl}`;
+            output += `@file:JsNonModule${nl}${nl}`;
+            output += `package ${config.package}${nl}${nl}`;
+
+            for (const statement of topLevelStatements) {
+                if (Node.isVariableStatement(statement)) {
+                    for (const decl of statement.getDeclarations()) {
+                        output += generateVariable(statement, decl, config) + nl;
+                    }
+                }
+                else if (Node.isFunctionDeclaration(statement))
+                    output += generateFunction(statement, config) + nl;
+                else if (Node.isClassDeclaration(statement))
+                    output += generateClass(statement, config) + nl;
+                else if (Node.isInterfaceDeclaration(statement))
+                    output += generateInterface(statement, config) + nl;
+                else if (Node.isTypeAliasDeclaration(statement))
+                    output += generateTypeAlias(statement, config) + nl;
+            }
+
+            outputs.set(`${getValidFileName(sourceFile.getBaseNameWithoutExtension())}.d.kt`, output);
+        }
     } else {
-        const nl = config.newLine || '\n';
+        let output = `// Generated by Tykon from ${baseName}${nl}${nl}`;
+
         config.imports = config.imports || [];
         config.imports.push('kotlin.js.*');
 
-        output += `@file:JsModule("${config.module || sourceFile.getBaseNameWithoutExtension()}")${nl}${nl}`;
+        output += `@file:JsModule("${rootModule}")${nl}${nl}`;
         output += tykon(config, sourceFile);
+        outputs.set(`${getValidFileName(sourceFile.getBaseNameWithoutExtension())}.d.kt`, output);
     }
-    return output;
+
+    return outputs;
 }

@@ -7,3 +7,4 @@ dist
 docs/
 .DS_Store
 jest.log
+tests/out/

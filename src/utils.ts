@@ -1,12 +1,23 @@
 import { JSDocableNode, NameableNodeSpecific, NamedNodeSpecificBase } from "ts-morph";
 
 let unnamedCounter = 0;
+
+/**
+ * Finds the name of a declaration, handling special cases like dots in names,
+ * @param declaration The declaration to find the name for.
+ * @returns The name of the declaration, or a generated name if it is unnamed.
+ */
 export function findName(declaration: NameableNodeSpecific | NamedNodeSpecificBase<any>): string {
     let name = declaration.getName();
     if (name) {
         // Handle names with dots (e.g., module names)
         if (name.includes('.')) {
             name = name.split('.').pop() || name; // Get the last part after the dot
+        }
+
+        // Handle names with curly braces
+        if (name.startsWith('{') && name.endsWith('}')) {
+            name = `object${unnamedCounter++}`
         }
 
         // Handle constants that are resolved to a string
@@ -31,15 +42,28 @@ export function findName(declaration: NameableNodeSpecific | NamedNodeSpecificBa
     }
 }
 
+const tagNameConversions: Record<string, string> = {
+    "returns": "return",
+}
+
+/**
+ * Generates JSDoc comments for a given declaration.
+ * @param declaration The declaration to generate JSDoc for.
+ * @param nl The newline character to use in the JSDoc.
+ * @param indent The indentation to use in the JSDoc.
+ * @returns A string containing the JSDoc comments.
+ */
 export function getJsDoc(declaration: JSDocableNode, nl: string, indent: string = ''): string {
     const jsdoc = declaration.getJsDocs().map(doc => {
         const tags = doc.getTags().map(tag => {
             const tagName = tag.getTagName();
+            const convertedTagName = tagNameConversions[tagName] || tagName;
+
             const tagText = tag.getCommentText() || "No description provided.";
-            return `@${tagName} ${tagText}`;
+            return `@${convertedTagName} ${tagText}`;
         }).join(`${nl}${indent} * `);
 
-        return `${indent}/**${nl}${indent} * ${doc.getComment() || ""}${nl}${indent} * ${tags}${nl}${indent} */`;
+        return `${indent}/**${nl}${indent} * ${doc.getCommentText() || ""}${nl}${indent} * ${tags}${nl}${indent} */`;
     }
     ).join(`${nl}${nl}`);
     return jsdoc ? `${jsdoc}${nl}` : '';
@@ -70,10 +94,14 @@ const types: Record<string, string> = {
     "Float64Array": "DoubleArray",
     // TypeScript Library types
     "Record": "Map",
-    "Readonly": "Map",
-    "Promise": "Promise"
+    "Readonly": "Map"
 }
 
+/**
+ * A map to store constants that are resolved to strings.
+ * This is used to handle cases where constants are defined
+ * in TypeScript and need to be converted to Kotlin.
+ */
 export const currentConstants: Map<string, string> = new Map<string, string>();
 
 function splitGenerics(input: string): string[] {
@@ -122,10 +150,15 @@ function extractGenericParts(type: string): [string, string] | null {
     return null;
 }
 
-function isInlineObjectType(type: string): boolean {
-    return /^{[^{}]*}$/.test(type.trim());
-}
-
+/**
+ * Converts a TypeScript type to a Kotlin type.
+ * @param type The TypeScript type to convert.
+ * @returns The corresponding Kotlin type as a string.
+ * @example
+ * convertToKotlinType("string") // returns "String"
+ * convertToKotlinType("number[]") // returns "Array<Double>"
+ * convertToKotlinType("Promise<string>") // returns "Promise<String>"
+ */
 export function convertToKotlinType(type: string): string {
     type = type.trim();
 
@@ -144,9 +177,25 @@ export function convertToKotlinType(type: string): string {
     if (/^\d+(\.\d+)?$/.test(type)) return 'Double';
     if (type === 'true' || type === 'false') return 'Boolean';
 
+    // Handle typeof and new expressions
+    if (type.startsWith('typeof ')) {
+        const innerType = type.slice(7).trim();
+        return convertToKotlinType(innerType);
+    }
+
+    // Handle new expressions
+    if (type.startsWith('new ')) {
+        const innerType = type.slice(4).trim();
+        return convertToKotlinType(innerType);
+    }
+
     // Handle inline object types
-    if (isInlineObjectType(type)) {
-        return 'dynamic';
+    if (type.startsWith('{') && type.endsWith('}')) {
+        const properties = type.slice(1, -1).split(',').map(prop => {
+            const [name, propType] = prop.split(':').map(s => s.trim());
+            return `${name}: ${convertToKotlinType(propType || 'Any')}`;
+        });
+        return `Map<String, Any> /* { ${properties.join(", ")} } */`;
     }
 
     // Handle qualified names (e.g., module.Type)
@@ -161,7 +210,7 @@ export function convertToKotlinType(type: string): string {
         const [_, paramStr, returnType] = fnMatch;
 
         const params = splitGenerics(paramStr).map(param => {
-            const [name, paramType] = param.split(":").map(s => s.trim());
+            const [_, paramType] = param.split(":").map(s => s.trim());
             return convertToKotlinType(paramType || 'Any');
         });
 

@@ -1,15 +1,16 @@
 {
   "name": "tykon",
   "description": "Generate Kotlin Source Files from TypeScript Definitions",
+  "type": "module",
   "version": "1.0.0",
+  "author": "gmitch215",
+  "license": "MIT",
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target node --production",
     "test": "jest",
     "test-log": "jest --logHeapUsage --detectOpenHandles > jest.log",
     "doc": "bunx typedoc src/index.ts --entryPointStrategy Expand src --out docs --plugin typedoc-github-theme --excludePrivate --excludeProtected"
   },
-  "module": "src/index.ts",
-  "type": "module",
+  "bin": "dist/index.js",
   "devDependencies": {
     "@babel/core": "^7.27.1",
     "@babel/preset-env": "^7.27.2",
@@ -26,6 +27,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "commander": "^14.0.0",
     "ts-morph": "^26.0.0"
   }
 }

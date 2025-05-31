@@ -1,4 +1,30 @@
 /**
+ * An example type that can be either a string or a boolean.
+ */
+export type ExampleType = string | boolean
+
+/**
+ * An example type that represents an object with various properties.
+ */
+export type ExampleType2 = {
+    /**
+     * A string property of ExampleType2.
+     * @example "example string"
+     */
+    a: string;
+    /**
+     * A number property of ExampleType2.
+     * @example 42
+     */
+    b: number;
+    /**
+     * A boolean property of ExampleType2.
+     * @example true
+     */
+    c: boolean;
+}
+
+/**
  * An example class with various methods and properties.
  * @example
  * const example = new ExampleClass("example");
