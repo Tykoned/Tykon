@@ -17,11 +17,13 @@ function createProperties(declaration: ClassDeclaration | InterfaceDeclaration, 
         let propName = utils.findName(prop);
         if (propName.startsWith('__')) continue; // Skip private properties (convention)
 
-        const propType = utils.convertToKotlinType(prop.getType().getText());
-        const isOptional = prop.getType().isNullable() ? '?' : '';
+        const tsType = utils.findType(prop.getType());
+        const propType = utils.convertToKotlinType(tsType.getText());
+
+        const isOptional = tsType.isNullable() ? '?' : '';
         const jsDoc = utils.getJsDoc(prop, nl, indent);
 
-        output += `${jsDoc}${indent}${type} ${propName}${isOptional}: ${propType}${nl}${nl}`;
+        output += `${jsDoc}${indent}${type} ${propName}: ${propType}${isOptional}${nl}${nl}`;
     }
 
     return output;
@@ -38,11 +40,12 @@ function createMethods(declaration: ClassDeclaration | InterfaceDeclaration, con
         const methodName = utils.findName(method);
         if (methodName.startsWith('__')) continue; // Skip private methods (convention)
 
-        const returnType = utils.convertToKotlinType(method.getReturnType().getText());
+        const returnType = utils.convertToKotlinType(utils.findType(method.getReturnType()).getText());
         const params = method.getParameters().map(param => {
             const paramName = utils.findName(param);
-            const paramType = utils.convertToKotlinType(param.getType().getText());
-            const isOptional = param.isOptional() ? '?' : '';
+            const paramType = utils.convertToKotlinType(utils.findType(param.getType()).getText());
+            const isOptional = param.isOptional() ? '? = null' : '';
+
             return `${paramName}: ${paramType}${isOptional}`;
         }).join(', ');
 
@@ -68,22 +71,25 @@ function createStaticProperties(declaration: ClassDeclaration, config: TykonConf
         const propName = utils.findName(prop);
         if (propName.startsWith('__')) continue; // Skip private properties (convention)
 
-        const propType = utils.convertToKotlinType(prop.getType().getText());
-        const isOptional = prop.getType().isNullable() ? '?' : '';
+        const tsType = utils.findType(prop.getType());
+        const propType = utils.convertToKotlinType(tsType.getText());
+        const isOptional = tsType.isNullable() ? '?' : '';
         const jsDoc = utils.getJsDoc(prop, nl, indent.repeat(2));
 
-        output += `${jsDoc}${indent}${indent}val ${propName}${isOptional}: ${propType}${nl}${nl}`;
+        output += `${jsDoc}${indent}${indent}val ${propName}: ${propType}${isOptional}${nl}${nl}`;
     }
 
     for (const method of declaration.getStaticMethods()) {
         const methodName = utils.findName(method);
         if (methodName.startsWith('__')) continue; // Skip private methods (convention)
 
-        const returnType = utils.convertToKotlinType(method.getReturnType().getText());
+        const returnType = utils.convertToKotlinType(utils.findType(method.getReturnType()).getText());
         const params = method.getParameters().map(param => {
-            const paramName = param.getName();
-            const paramType = utils.convertToKotlinType(param.getType().getText());
-            return `${paramName}: ${paramType}`;
+            const paramName = utils.findName(param);
+            const paramType = utils.convertToKotlinType(utils.findType(param.getType()).getText());
+            const isOptional = param.isOptional() ? '? = null' : '';
+
+            return `${paramName}: ${paramType}${isOptional}`;
         }).join(', ');
         const jsDoc = utils.getJsDoc(method, nl, indent.repeat(2));
 
@@ -104,7 +110,7 @@ function generateVariable(statement: VariableStatement, declaration: VariableDec
     const name = utils.findName(declaration);
     if (name.startsWith('__')) return output; // Skip private variables (convention)
 
-    const type = utils.convertToKotlinType(declaration.getType().getText());
+    const type = utils.convertToKotlinType(utils.findType(declaration.getType()).getText());
 
     output += `${utils.getJsDoc(statement, nl)}external val ${name}: ${type}${nl}`;
 
@@ -120,11 +126,13 @@ function generateFunction(declaration: FunctionDeclaration, config: TykonConfig)
     const name = utils.findName(declaration);
     if (name.startsWith('__')) return output; // Skip private functions (convention)
 
-    const returnType = utils.convertToKotlinType(declaration.getReturnType().getText());
+    const returnType = utils.convertToKotlinType(utils.findType(declaration.getReturnType()).getText());
     const params = declaration.getParameters().map(param => {
-        const paramName = param.getName();
-        const paramType = utils.convertToKotlinType(param.getType().getText());
-        return `${paramName}: ${paramType}`;
+        const paramName = utils.findName(param);
+        const paramType = utils.convertToKotlinType(utils.findType(param.getType()).getText());
+        const isOptional = param.isOptional() ? '? = null' : '';
+
+        return `${paramName}: ${paramType}${isOptional}`;
     }).join(', ');
     const generics = declaration.getTypeParameters().length > 0
         ? `<${declaration.getTypeParameters().map(tp => tp.getName()).join(', ')}> `
@@ -177,9 +185,11 @@ function generateClass(declaration: ClassDeclaration, config: TykonConfig): stri
     for (const constructor of declaration.getConstructors()) {
         const params = constructor.getParameters().map(param => {
             const paramName = param.getName();
-            const paramType = utils.convertToKotlinType(param.getType().getText());
-            const isOptional = param.getType().isNullable() ? '?' : '';
-            return `${paramName}${isOptional}: ${paramType}`;
+            const tsType = utils.findType(param.getType());
+            const paramType = utils.convertToKotlinType(tsType.getText());
+            const isOptional = tsType.isNullable() ? '? = null' : '';
+
+            return `${paramName}: ${paramType}${isOptional}`;
         }).join(', ');
 
         const jsDoc = utils.getJsDoc(constructor, nl, indent);
@@ -254,7 +264,7 @@ function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfi
     const indent = config.tabs ? '\t'.repeat(config.tabs) : ' '.repeat(config.spaces || 4);
 
     const name = declaration.getName();
-    const type = declaration.getType();
+    const type = utils.findType(declaration.getType());
     const typeText = type.getText();
     const typeParams = declaration.getTypeParameters();
     const generics = typeParams.length > 0 ? `<${typeParams.map(tp => tp.getName()).join(', ')}>` : '';
@@ -264,6 +274,11 @@ function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfi
     // If it's a union or something not object-like, fallback to typealias with Any
     if (!type.isObject() || type.isUnion()) {
         return `${doc}typealias ${name}${generics} = dynamic /* ${typeText} */${nl}${nl}`;
+    }
+
+    // Not an object type, return as typealias
+    if (!type.isObject()) {
+        return `${doc}typealias ${name}${generics} = ${typeText}${nl}${nl}`;
     }
 
     const properties = type.getProperties();
@@ -278,7 +293,7 @@ function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfi
         const propName = prop.getName();
         if (propName.startsWith('__')) continue; // Skip private properties (convention)
 
-        const propType = propDecl.getType().getText();
+        const propType = utils.findType(propDecl.getType()).getText();
         const isOptional = propDecl.hasQuestionToken();
         const kotlinType = utils.convertToKotlinType(propType);
         const propDoc = utils.getJsDoc(propDecl, nl, indent);

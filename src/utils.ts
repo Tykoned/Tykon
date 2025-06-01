@@ -1,4 +1,4 @@
-import { JSDocableNode, NameableNodeSpecific, NamedNodeSpecificBase } from "ts-morph";
+import { JSDocableNode, NameableNodeSpecific, NamedNodeSpecificBase, Type } from "ts-morph";
 
 let unnamedCounter = 0;
 
@@ -40,6 +40,23 @@ export function findName(declaration: NameableNodeSpecific | NamedNodeSpecificBa
         unnamedCounter++;
         return `Unnamed${unnamedCounter}`;
     }
+}
+
+export function findType(type: Type): Type {
+    let currentType = type
+    if (type.isLiteral()) {
+        currentType = type.getBaseTypeOfLiteralType();
+    }
+
+    if (type.isUnionOrIntersection()) {
+        const types = currentType.getUnionTypes().map(t => findType(t))
+        const uniqueTypes = types.filter((t, index) => types.indexOf(t) === index);
+        if (uniqueTypes.length === 1) {
+            return uniqueTypes[0];
+        }
+    }
+
+    return type
 }
 
 const tagNameConversions: Record<string, string> = {
@@ -109,10 +126,22 @@ function splitGenerics(input: string): string[] {
     let current = '';
     let depth = 0;
     let inString = false;
+    let stringChar = '';
 
     for (let i = 0; i < input.length; i++) {
         const char = input[i];
-        if (char === '"' || char === "'") inString = !inString;
+
+        if ((char === '"' || char === "'") && !inString) {
+            inString = true;
+            stringChar = char;
+            current += char;
+            continue;
+        } else if (char === stringChar && inString) {
+            inString = false;
+            current += char;
+            continue;
+        }
+
         if (inString) {
             current += char;
             continue;
@@ -128,12 +157,15 @@ function splitGenerics(input: string): string[] {
 
         current += char;
     }
+
     if (current.trim()) result.push(current.trim());
+
     return result;
 }
 
 function extractGenericParts(type: string): [string, string] | null {
     let depth = 0, start = -1;
+
     for (let i = 0; i < type.length; i++) {
         if (type[i] === '<') {
             if (depth === 0) start = i;
@@ -147,6 +179,7 @@ function extractGenericParts(type: string): [string, string] | null {
             }
         }
     }
+
     return null;
 }
 
@@ -159,65 +192,100 @@ function extractGenericParts(type: string): [string, string] | null {
  * convertToKotlinType("number[]") // returns "Array<Double>"
  * convertToKotlinType("Promise<string>") // returns "Promise<String>"
  */
-export function convertToKotlinType(type: string): string {
-    type = type.trim();
+export function convertToKotlinType(originalType: string): string {
+    let type = originalType.trim();
+    console.log(`Converting TypeScript type: '${type}'`);
+    if (types[type]) return types[type];
+
+    // typeof, new
+    if (type.startsWith('typeof') || type.startsWith('new')) {
+        return convertToKotlinType(type.split(' ').slice(1).join(' '));
+    }
+
+    // keyof
+    if (type.startsWith('keyof')) {
+        return "dynamic";
+    }
 
     // Handle unions and intersections
     if (type.includes('|') || type.includes('&')) {
+        const delimiter = type.includes('|') ? '|' : '&';
+        if (delimiter === '&' && type.includes(' | ')) {
+            // If both union and intersection are present, prioritize union
+            return 'dynamic';
+        }
+
+        // Check to see if they're all the same primitive type
+        const parts = splitGenerics(type.split(delimiter).join(',')).map(s => s.trim()).filter(Boolean);
+        if (parts.length === 0) return 'dynamic';
+
+        function getPrimitiveType(val: string): string | null {
+            if (/^(['"])(.*)\1$/.test(val)) return 'string';
+            if (/^\d+(\.\d+)?$/.test(val)) return 'number';
+            if (val === 'true' || val === 'false') return 'boolean';
+            if (val === 'bigint') return 'bigint';
+            if (val === 'null') return 'null';
+            if (val === 'undefined') return 'undefined';
+
+            return null;
+        }
+
+        const primitiveTypes = parts.map(getPrimitiveType);
+        const uniqueTypes = Array.from(new Set(primitiveTypes.filter(Boolean)));
+
+        if (uniqueTypes.length === 1) {
+            switch (uniqueTypes[0]) {
+                case 'string':
+                    parts.forEach(p => {
+                        if (/^(['"])(.*)\1$/.test(p)) currentConstants.set(p, p.slice(1, -1));
+                    });
+                    return 'String';
+                case 'number':
+                    return 'Double';
+                case 'boolean':
+                    return 'Boolean';
+                case 'bigint':
+                    return 'Long';
+                case 'null':
+                case 'undefined':
+                    return 'Unit';
+            }
+        }
+
         return 'dynamic';
     }
 
-    // Handle constant strings
-    if (/^(['"])(.*)\1$/.test(type)) {
+    // Handle arrow functions
+    const fnMatch = /^\((.*)\)\s*=>\s*(.+)$/.exec(type);
+    if (fnMatch) {
+        const [_, params, returnType] = fnMatch;
+        const paramList = splitGenerics(params).map(param => {
+            const [_, paramType] = param.split(":").map(s => s.trim());
+            return convertToKotlinType(paramType || "Any");
+        });
+        return `(${paramList.join(", ")}) -> ${convertToKotlinType(returnType.trim())}`;
+    }
+
+    // Handle literals
+    if (/^(['"]).*\1$/.test(type)) {
         currentConstants.set(type, type.slice(1, -1));
         return 'String';
     }
 
-    // Handle literal values like numbers or booleans
     if (/^\d+(\.\d+)?$/.test(type)) return 'Double';
     if (type === 'true' || type === 'false') return 'Boolean';
 
-    // Handle typeof and new expressions
-    if (type.startsWith('typeof ')) {
-        const innerType = type.slice(7).trim();
-        return convertToKotlinType(innerType);
-    }
-
-    // Handle new expressions
-    if (type.startsWith('new ')) {
-        const innerType = type.slice(4).trim();
-        return convertToKotlinType(innerType);
-    }
-
-    // Handle inline object types
+    // Inline object types
     if (type.startsWith('{') && type.endsWith('}')) {
-        const properties = type.slice(1, -1).split(',').map(prop => {
-            const [name, propType] = prop.split(':').map(s => s.trim());
-            return `${name}: ${convertToKotlinType(propType || 'Any')}`;
-        });
-        return `Map<String, Any> /* { ${properties.join(", ")} } */`;
+        return `Map<String, Any> /* ${type} */`;
     }
 
-    // Handle qualified names (e.g., module.Type)
-    if (type.includes('.')) {
-        const parts = type.split('.');
-        return convertToKotlinType(parts[parts.length - 1]);
+    // Modularized names without generics
+    if (type.includes('.') && !type.includes('<')) {
+        return convertToKotlinType(type.split('.').pop()!);
     }
 
-    // Handle function types
-    const fnMatch = /^\((.*)\)\s*=>\s*(.+)$/.exec(type);
-    if (fnMatch) {
-        const [_, paramStr, returnType] = fnMatch;
-
-        const params = splitGenerics(paramStr).map(param => {
-            const [_, paramType] = param.split(":").map(s => s.trim());
-            return convertToKotlinType(paramType || 'Any');
-        });
-
-        return `(${params.join(", ")}) -> ${convertToKotlinType(returnType.trim())}`;
-    }
-
-    // Handle array suffix (e.g., string[][])
+    // Handle array suffixes (e.g., string[][])
     let arrayDepth = 0;
     while (type.endsWith('[]')) {
         arrayDepth++;
@@ -225,20 +293,26 @@ export function convertToKotlinType(type: string): string {
     }
 
     // Handle generic types
-    const genericParts = extractGenericParts(type);
+    const generic = extractGenericParts(type);
     let baseType: string;
-    if (genericParts) {
-        const [base, rawArgs] = genericParts;
-        const args = splitGenerics(rawArgs).map(convertToKotlinType);
-        const convertedBase = types[base] || base;
-        baseType = `${convertedBase}<${args.join(", ")}>`;
+    if (generic) {
+        const [baseRaw, argsRaw] = generic;
+        let base = types[baseRaw.trim()] ?? baseRaw.trim();
+        
+        // Handle modularized names
+        if (base.includes('.')) {
+            base = base.split('.').pop()!;
+        }
+
+        const args = splitGenerics(argsRaw).map(arg => convertToKotlinType(arg));
+        baseType = `${base}<${args.join(', ')}>`;
     } else {
-        baseType = types[type] || type;
+        baseType = types[type] ?? type;
     }
 
-    // Apply array nesting if needed
-    if (arrayDepth > 0) {
-        return 'Array<'.repeat(arrayDepth) + baseType + '>'.repeat(arrayDepth);
+    // Wrap in array if needed
+    for (let i = 0; i < arrayDepth; i++) {
+        baseType = `Array<${baseType}>`;
     }
 
     return baseType;

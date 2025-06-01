@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "commander": "^14.0.0",
-    "ts-morph": "^26.0.0"
+    "ts-morph": "^26.0.0",
+    "tykon": "file:"
   }
 }
