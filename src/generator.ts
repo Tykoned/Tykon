@@ -1,8 +1,37 @@
-import { ClassDeclaration, FunctionDeclaration, InterfaceDeclaration, ModifierableNode, ModuleDeclaration, Node, SourceFile, StatementedNode, SyntaxKind, TypeAliasDeclaration, VariableDeclaration, VariableStatement } from "ts-morph";
+import { ClassDeclaration, FunctionDeclaration, InterfaceDeclaration, ModifierableNode, ModuleDeclaration, Node, SourceFile, StatementedNode, SyntaxKind, ts, Type, TypeAliasDeclaration, TypeFlags, TypeParameterDeclaration, VariableDeclaration, VariableStatement } from "ts-morph";
 import { TykonConfig } from "./config";
 import * as utils from "./utils";
 
 // Generator Utilities
+
+function getParentProperties(declaration: ClassDeclaration | InterfaceDeclaration) {
+    let extendsClauses = declaration instanceof ClassDeclaration
+        ? declaration.getExtends() ? [declaration.getExtends()] : []
+        : declaration.getExtends(); // InterfaceDeclaration returns an array
+
+    const parentProperties = extendsClauses.flatMap(ext => {
+        if (!ext) return []; // Skip if no parent
+
+        const symbol = ext.getType().getSymbol();
+        if (!symbol) return [];
+
+        return symbol.getDeclarations().flatMap(d => {
+            if (declaration instanceof ClassDeclaration && Node.isInterfaceDeclaration(d)) return []; // Skip interfaces in class declarations
+
+            // Filter only class or interface declarations
+            if (Node.isInterfaceDeclaration(d) || Node.isClassDeclaration(d)) {
+                if (d.getName() === 'Error') return []; // Skip Error class/interface
+
+                return d.getMembers().filter(m =>
+                    Node.isPropertyDeclaration(m) || Node.isPropertySignature(m)
+                );
+            }
+            return [];
+        });
+    });
+
+    return parentProperties;
+}
 
 function createProperties(declaration: ClassDeclaration | InterfaceDeclaration, config: TykonConfig): string {
     let output = "";
@@ -20,10 +49,9 @@ function createProperties(declaration: ClassDeclaration | InterfaceDeclaration, 
         let override = '';
         
         // Check parents for override
-        const parent = declaration.getParent();
-        if (parent instanceof ClassDeclaration || parent instanceof InterfaceDeclaration) {
-            const parentMethods = parent.getProperties().filter(p => utils.findName(p) === propName);
-            if (parentMethods.length > 0) override = 'override ';
+        const parentProperties = getParentProperties(declaration);
+        if (parentProperties.some(p => utils.findName(p) === propName)) {
+            override = 'override ';
         }
 
         const tsType = utils.findType(prop.getType());
@@ -34,7 +62,12 @@ function createProperties(declaration: ClassDeclaration | InterfaceDeclaration, 
             continue;
         }
 
+        // Filter out properties whose type is a type parameter if the declaration has type parameters
+        if (declaration.getTypeParameters().length == 0 && tsType.isTypeParameter()) continue;
+
         const propType = utils.convertToKotlinType(tsType.getText());
+        if (propType == 'Nothing') continue; // Skip properties with Nothing type
+
         const isOptional = tsType.isNullable() ? '?' : '';
 
         output += `${jsDoc}${indent}${override}${type} ${propName}: ${propType}${isOptional}${nl}${nl}`;
@@ -86,15 +119,32 @@ function createMethods(declaration: ClassDeclaration | InterfaceDeclaration, con
             return `${paramName}: ${paramType}${isOptional}`;
         }).join(', ');
 
-        const generics = method.getTypeParameters().length > 0
-            ? `<${method.getTypeParameters().map(tp => tp.getName()).join(', ')}> `
+        const typeParams = method.getTypeParameters();
+        const generics = typeParams.length > 0
+            ? `<${typeParams.map(tp => tp.getName()).join(', ')}> `
             : '';
+        
+        const constraints: string[] = [];
+        for (const tp of typeParams) {
+            const constraint = tp.getConstraint();
+            if (constraint) {
+                const type = utils.convertToKotlinType(constraint.getText(), false, true);
+                if (type.startsWith('Any') || type.startsWith('dynamic') || type === 'Unit') continue; // Skip Any, dynamic or Unit types
+                
+                constraints.push(`${tp.getName()} : ${type} /* ${constraint.getText()} */`);
+            }
+        }
+        const whereClause = constraints.length > 0 ? ` where ${constraints.join(', ')}` : '';
         const jsDoc = utils.getJsDoc(method, nl, indent);
 
-        methodOutput.push({ method: `${jsDoc}${indent}${override}fun ${generics}${methodName}(${params})`, returnSuffix: `${returnTypeSuffix}${nl}${nl}`});
+        methodOutput.push({ method: `${jsDoc}${indent}${override}fun ${generics}${methodName}(${params})`, returnSuffix: `${returnTypeSuffix}${whereClause}${nl}${nl}`});
     }
 
-    const byMethodName = methodOutput.map(m => m.method.replace('? = definedExternally', '').replace(/\*[\s\S]*?\*/g, '').trim());
+    const byMethodName = methodOutput.map(m => m.method
+        .replace('? = definedExternally', '')
+        .replace(/\*[\s\S]*?\*/g, '')
+        .trim()
+    );
     const declared: string[] = []
 
     for (const method of methodOutput) {
@@ -201,6 +251,15 @@ function generateFunction(declaration: FunctionDeclaration, config: TykonConfig)
     return output;
 }
 
+const doNotExpose = [
+    "GlobalDescriptor",
+    "EventTarget",
+    "MessageEvent",
+    "MessageEventInit",
+    "WebSocket",
+    "WebSocketEventMap"
+]
+
 function generateClass(declaration: ClassDeclaration, config: TykonConfig): string {
     if (!declaration.isAmbient()) throw new Error("Only ambient classes are supported");
 
@@ -209,6 +268,9 @@ function generateClass(declaration: ClassDeclaration, config: TykonConfig): stri
     const indent = config.tabs ? '\t'.repeat(config.tabs) : ' '.repeat(config.spaces || 4);
 
     const name = utils.findName(declaration);
+    if (doNotExpose.includes(name)) return ""; // Skip classes that should not be exposed
+    if (name.startsWith('__') || name.startsWith('$')) return ""; // Skip private classes (convention)
+
     const modifiers = declaration.isAbstract() ? 'abstract ' : 'open ';
 
     // Handle class type parameters
@@ -291,8 +353,24 @@ function generateInterface(declaration: InterfaceDeclaration, config: TykonConfi
     let output = "";
     const nl = config.newLine || '\n';
 
+    const name = utils.findName(declaration);
+    if (doNotExpose.includes(name)) return ""; // Skip classes that should not be exposed
+    if (name.startsWith('__') || name.startsWith('$')) return ""; // Skip private classes (convention)
+
     // Handle interface type parameters
-    const typeParams = declaration.getTypeParameters();
+    let typeParams: TypeParameterDeclaration[] = []
+    const symbol = declaration.getSymbol();
+    if (symbol) {
+        const canonDeclarations = symbol.getDeclarations().filter(Node.isInterfaceDeclaration)
+        for (const canonDeclaration of canonDeclarations) {
+            const existingNames = new Set(typeParams.map(tp => tp.getName()));
+            const canonicalParams = canonDeclaration.getTypeParameters().filter(tp => 
+                !existingNames.has(tp.getName())
+            );
+            typeParams.push(...canonicalParams);
+        }
+    }
+
     let generics = "";
     let constraints: string[] = [];
 
@@ -328,7 +406,7 @@ function generateInterface(declaration: InterfaceDeclaration, config: TykonConfi
         whereClause = ` where ${constraints.join(', ')}`;
     }
 
-    output += `${utils.getJsDoc(declaration, nl)}external interface ${utils.findName(declaration)}${generics}${parent0}${whereClause} {${nl}`;
+    output += `${utils.getJsDoc(declaration, nl)}external interface ${name}${generics}${parent0}${whereClause} {${nl}`;
     
     // Add interface properties
     output += createProperties(declaration, config);
@@ -350,6 +428,7 @@ function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfi
     const indent = config.tabs ? '\t'.repeat(config.tabs) : ' '.repeat(config.spaces || 4);
 
     const name = utils.findName(declaration);
+    if (doNotExpose.includes(name)) return ""; // Skip classes that should not be exposed
     if (name.startsWith('__')) return ""; // Skip private type aliases (convention)
 
     const type = utils.findType(declaration.getType());
@@ -357,8 +436,125 @@ function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfi
     const typeParams = declaration.getTypeParameters();
     
     const generics = typeParams.length > 0 ? `<${typeParams.map(tp => tp.getName()).join(', ')}>` : '';
+    const constraints: string[] = [];
+    for (const tp of typeParams) {
+        const constraint = tp.getConstraint();
+        if (constraint) {
+            const type = utils.convertToKotlinType(constraint.getText(), false, true);
+            if (type.startsWith('Any') || type.startsWith('dynamic') || type === 'Unit') continue; // Skip Any, dynamic or Unit types
+            
+            constraints.push(`${tp.getName()} : ${type} /* ${constraint.getText()} */`);
+        }
+    }
+    const whereClause = constraints.length > 0 ? ` where ${constraints.join(', ')}` : '';
 
     const doc = utils.getJsDoc(declaration, nl);
+
+    // Helper to generate properties from an ObjectType
+    function createPropertiesFromType(objectType: Type) {
+        const properties = objectType.getProperties();
+        let propsOutput = '';
+        for (const prop of properties) {
+            const declarations = prop.getDeclarations();
+            if (declarations.length === 0) continue;
+            const propDecl = declarations[0];
+            if (!Node.isPropertySignature(propDecl)) continue;
+
+            const propName = utils.findName(propDecl);
+            if (propName.startsWith('__') || propName.startsWith('$')) continue; // Skip private properties
+
+            const propType = utils.findType(propDecl.getType()).getText();
+            const isOptional = propDecl.hasQuestionToken();
+            const kotlinType = utils.convertToKotlinType(propType);
+            const propDoc = utils.getJsDoc(propDecl, nl, indent);
+
+            propsOutput += `${propDoc}${indent}var ${propName}: ${kotlinType}${isOptional ? '?' : ''}${nl}`;
+        }
+        return propsOutput;
+    }
+
+    // Detect pure intersection types: e.g. AutoRagSearchRequest & { stream?: boolean; }
+    if (type.isIntersection()) {
+        const intersectionTypes = type.getIntersectionTypes();
+
+        const parents: string[] = [];
+        let inlineObjectType: Type | null = null;
+
+        for (const t of intersectionTypes) {
+            if (t.isTypeParameter()) continue; // Skip type parameters
+
+            const typeText = t.getText();
+            if (typeText.startsWith('{') && typeText.endsWith('}')) inlineObjectType = t; // Inline object type
+            else {
+                const text = utils.convertToKotlinType(typeText, false, true);
+                if (text.startsWith('dynamic') || text.startsWith('Any')) continue; // Skip dynamic or Any types
+
+                parents.push(text);
+            }
+        }
+
+        const parents0 = parents.length > 0 ? ` : ${parents.join(', ')}` : '';
+
+        // If we found parents and an inline object type, generate external interface with inheritance
+        if (inlineObjectType) {
+            let output = `${doc}external interface ${name}${generics}${parents0}${whereClause} {${nl}`;
+            output += createPropertiesFromType(inlineObjectType);
+            output += `}${nl}${nl}`;
+
+            // Add Creator Function
+            typeAliases.push(`fun ${generics ? generics + ' ' : ''}${name}(apply: ${name}${generics}.() -> Unit = {}): ${name}${generics}${whereClause} = js("{}").apply(apply)${nl}${nl}`);
+            return output;
+        }
+
+        // Fallback to typealias with dynamic if cannot properly handle
+        typeAliases.push(`${doc}typealias ${name}${generics} = ${utils.convertToKotlinType(typeText, true, true)}${nl}${nl}`);
+        return "";
+    }
+
+    if (type.getFlags() & TypeFlags.Conditional) {
+        // Handle conditional types
+        const typeNode = declaration.getTypeNode();
+        
+        if (Node.isConditionalTypeNode(typeNode)) {
+            const tr = typeNode.getTrueType();
+            const fa = typeNode.getFalseType();
+            
+            const trueText = tr.getText();
+            const falseText = fa.getText();
+            
+            // Check if the false type is undefined, unknown, never, or similar "empty" types
+            const falsy = falseText === 'undefined' || 
+                                falseText === 'unknown' || 
+                                falseText === 'never' || 
+                                falseText === 'void' ||
+                                falseText === 'null';
+            
+            if (falsy) {
+                // Return nullable version of the true type
+                const kotlinTrueType = utils.convertToKotlinType(trueText, false, true);
+                typeAliases.push(`${doc}typealias ${name}${generics} = ${kotlinTrueType}?${whereClause}${nl}${nl}`);
+                return ""; // Skip object type alias generation
+            } else {
+                // Check if true and false types are the same
+                const kotlinTrueType = utils.convertToKotlinType(trueText, false, true);
+                const kotlinFalseType = utils.convertToKotlinType(falseText, false, true);
+                
+                if (kotlinTrueType === kotlinFalseType) {
+                    // Same types, just use the type directly
+                    typeAliases.push(`${doc}typealias ${name}${generics} = ${kotlinTrueType}${whereClause}${nl}${nl}`);
+                    return "";
+                } else {
+                    // Different types, fallback to Any
+                    typeAliases.push(`${doc}typealias ${name}${generics} = Any${whereClause}${nl}${nl}`);
+                    return "";
+                }
+            }
+        } else {
+            // Fallback if we can't parse the conditional type node
+            typeAliases.push(`${doc}typealias ${name}${generics} = Any${whereClause}${nl}${nl}`);
+            return "";
+        }
+    }
 
     // If it's a union or something not object-like, fallback to typealias with Any
     if (!type.isObject() || type.isUnion()) {
@@ -400,8 +596,8 @@ function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfi
     }
     output += `}${nl}${nl}`;
     
-    // Add Creator Method
-    typeAliases.push(`fun ${generics ? generics + ' ' : ''}${name}(): ${name}${generics} = js("{}")${nl}${nl}`);
+    // Add Creator Methods
+    typeAliases.push(`fun ${generics ? generics + ' ' : ''}${name}(apply: ${name}${generics}.() -> Unit = {}): ${name}${generics}${whereClause} = js("{}").apply(apply)${nl}${nl}`);
     return output;
 }
 

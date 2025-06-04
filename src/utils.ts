@@ -142,6 +142,7 @@ const types: Record<string, string> = {
     "Float32Array": "FloatArray",
     "Float64Array": "DoubleArray",
     // TypeScript Library types
+    "this": "dynamic",
     "Record": "Map",
     "void | Promise<void>": "Unit",
     "void | undefined": "Unit",
@@ -249,13 +250,23 @@ export function convertToKotlinType(originalType: string, strict: boolean = fals
 
     if (strict) return `${dynamicType} /* ${type} */`;
 
+    // import
+    if (type.startsWith('import')) {
+        const lastDotIndex = type.lastIndexOf('.');
+        if (lastDotIndex !== -1) {
+            return type.slice(lastDotIndex + 1).replace(/"/g, '');
+        }
+
+        return `${dynamicType} /* ${type} */`;
+    }
+
     // typeof, new, readonly
     if (type.startsWith('typeof') || type.startsWith('new') || type.startsWith('readonly')) {
         return convertToKotlinType(type.split(' ').slice(1).join(' '));
     }
 
-    // keyof
-    if (type.startsWith('keyof')) {
+    // keyof, Omit, Pick
+    if (type.startsWith('keyof') || type.startsWith('Omit<') || type.startsWith('Pick<')) {
         return `${dynamicType} /* ${type} */`;
     }
 
@@ -281,6 +292,26 @@ export function convertToKotlinType(originalType: string, strict: boolean = fals
         if (types[finalType]) return types[finalType];
 
         return `${dynamicType} /* ${finalType} */`;
+    }
+
+    // Handle conditional types
+    const conditionalRegex = /^(.+)\s+extends\s+(.+)\s*\?\s*(.+)\s*:\s*(.+)$/;
+    const conditionalMatch = type.match(conditionalRegex);
+    
+    if (conditionalMatch) {
+        const [_, __, constraint, trueType, falseType] = conditionalMatch.map(s => s.trim());
+
+        const functionConstraint = `(...args: any[]) => any`;
+        if (constraint === functionConstraint) {
+            const convertedTrue = convertToKotlinType(trueType, strict, noDynamic);
+            const convertedFalse = convertToKotlinType(falseType, strict, noDynamic);
+
+            if (convertedFalse === 'unknown' || convertedFalse === 'Any') {
+                return `${convertedTrue}?`;
+            }
+
+            return `${dynamicType} /* ${type} */`;
+        }
     }
 
     // Handle arrow functions

@@ -84,6 +84,7 @@ describe('Gradle Project Generation', () => {
                 'org.w3c.workers.*',
                 'org.w3c.xhr.*',
                 'web.abort.*',
+                'web.assembly.*',
                 'web.crypto.*',
                 'web.streams.*',
             ]
