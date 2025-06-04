@@ -2,6 +2,31 @@ import { JSDocableNode, NameableNodeSpecific, NamedNodeSpecificBase, Type } from
 
 let unnamedCounter = 0;
 
+const specialNames = [
+    "as",
+    "do",
+    "while",
+    "if",
+    "else",
+    "for",
+    "in",
+    "return",
+    "break",
+    "continue",
+    "switch",
+    "case",
+    "default",
+    "throw",
+    "try",
+    "catch",
+    "finally",
+    "inline",
+    "operator",
+    "suspend",
+    "dynamic",
+    "object"
+]
+
 /**
  * Finds the name of a declaration, handling special cases like dots in names,
  * @param declaration The declaration to find the name for.
@@ -10,11 +35,6 @@ let unnamedCounter = 0;
 export function findName(declaration: NameableNodeSpecific | NamedNodeSpecificBase<any>): string {
     let name = declaration.getName();
     if (name) {
-        // Handle names with dots (e.g., module names)
-        if (name.includes('.')) {
-            name = name.split('.').pop() || name; // Get the last part after the dot
-        }
-
         // Handle names with curly braces
         if (name.startsWith('{') && name.endsWith('}')) {
             name = `object${unnamedCounter++}`
@@ -25,14 +45,24 @@ export function findName(declaration: NameableNodeSpecific | NamedNodeSpecificBa
             const resolved = currentConstants.get(name)
             if (resolved) {
                 return resolved;
-            } else {
-                return name.slice(1, -1); // Return the name without brackets if not found in constants
             }
         }
 
-        // Handle special names that are in quotes or have special characters
-        if (name.startsWith('"') && name.endsWith('"')) {
-            return `\`${name.slice(1, -1)}\`` // Return the name without quotes escaped for Kotlin
+        // Handle special names that are in quotes
+        if (name.startsWith('"'))
+            name = name.slice(1)
+
+        if (name.endsWith('"'))
+            name = name.slice(0, -1)
+
+        // Handle reserved keywords and special characters
+        if (specialNames.includes(name) || name.includes('-') || name.includes(' ') || name.includes('/') || !Number.isNaN(Number(name.at(0)))) {
+            return `\`${name}\``; // Escape reserved keywords with backticks
+        }
+
+        // Handle names with dots (e.g., module names)
+        if (name.includes('.')) {
+            name = name.split('.').pop() || name; // Get the last part after the dot
         }
 
         return name!;
@@ -102,6 +132,8 @@ const types: Record<string, string> = {
     // Array types
     "Int8Array": "ByteArray",
     "Uint8Array": "ByteArray",
+    "Uint8Array<ArrayBuffer>": "ByteArray",
+    "Uint8Array<ArrayBufferLike>": "ByteArray",
     "Uint8ClampedArray": "ByteArray",
     "Int16Array": "ShortArray",
     "Uint16Array": "ShortArray",
@@ -111,8 +143,22 @@ const types: Record<string, string> = {
     "Float64Array": "DoubleArray",
     // TypeScript Library types
     "Record": "Map",
-    "Readonly": "Map"
+    "void | Promise<void>": "Unit",
+    "void | undefined": "Unit",
+    "ArrayBufferLike": "ArrayBuffer",
+    "ArrayBuffer | ArrayBufferView<ArrayBuffer>": "ArrayBuffer",
+    "ArrayBuffer | ArrayBufferView": "ArrayBuffer",
+    "Function": "Function<Unit>",
+    "AsyncIterableIterator": "AsyncIterator",
+    "IterableIterator": "Iterator",
 }
+
+const innerTypes = [
+    // Inner types are types that should be exported to their inner generic type
+    "Readonly",
+    "Partial",
+    "Required",
+]
 
 /**
  * A map to store constants that are resolved to strings.
@@ -186,73 +232,55 @@ function extractGenericParts(type: string): [string, string] | null {
 /**
  * Converts a TypeScript type to a Kotlin type.
  * @param type The TypeScript type to convert.
+ * @param strict Whether to never return a new type.
+ * @param noDynamic Whether to never return a dynamic type.
  * @returns The corresponding Kotlin type as a string.
  * @example
  * convertToKotlinType("string") // returns "String"
  * convertToKotlinType("number[]") // returns "Array<Double>"
  * convertToKotlinType("Promise<string>") // returns "Promise<String>"
  */
-export function convertToKotlinType(originalType: string): string {
+export function convertToKotlinType(originalType: string, strict: boolean = false, noDynamic: boolean = false): string {
+    if (!originalType) return '';
+
+    const dynamicType = noDynamic ? 'Any' : 'dynamic';
     let type = originalType.trim();
-    console.log(`Converting TypeScript type: '${type}'`);
     if (types[type]) return types[type];
 
-    // typeof, new
-    if (type.startsWith('typeof') || type.startsWith('new')) {
+    if (strict) return `${dynamicType} /* ${type} */`;
+
+    // typeof, new, readonly
+    if (type.startsWith('typeof') || type.startsWith('new') || type.startsWith('readonly')) {
         return convertToKotlinType(type.split(' ').slice(1).join(' '));
     }
 
     // keyof
     if (type.startsWith('keyof')) {
-        return "dynamic";
+        return `${dynamicType} /* ${type} */`;
     }
 
     // Handle unions and intersections
     if (type.includes('|') || type.includes('&')) {
-        const delimiter = type.includes('|') ? '|' : '&';
-        if (delimiter === '&' && type.includes(' | ')) {
-            // If both union and intersection are present, prioritize union
-            return 'dynamic';
-        }
+        if (type.includes('&')) return `${dynamicType} /* ${type} */`;
 
-        // Check to see if they're all the same primitive type
-        const parts = splitGenerics(type.split(delimiter).join(',')).map(s => s.trim()).filter(Boolean);
-        if (parts.length === 0) return 'dynamic';
-
-        function getPrimitiveType(val: string): string | null {
-            if (/^(['"])(.*)\1$/.test(val)) return 'string';
-            if (/^\d+(\.\d+)?$/.test(val)) return 'number';
-            if (val === 'true' || val === 'false') return 'boolean';
-            if (val === 'bigint') return 'bigint';
-            if (val === 'null') return 'null';
-            if (val === 'undefined') return 'undefined';
-
-            return null;
-        }
-
-        const primitiveTypes = parts.map(getPrimitiveType);
-        const uniqueTypes = Array.from(new Set(primitiveTypes.filter(Boolean)));
-
+        const unionTypes = type.split('|').map(t => t.trim());
+        const convertedTypes = unionTypes.map(t => convertToKotlinType(t, strict, noDynamic));
+        const uniqueTypes = convertedTypes.filter((t, index) => convertedTypes.indexOf(t) === index);
+        
         if (uniqueTypes.length === 1) {
-            switch (uniqueTypes[0]) {
-                case 'string':
-                    parts.forEach(p => {
-                        if (/^(['"])(.*)\1$/.test(p)) currentConstants.set(p, p.slice(1, -1));
-                    });
-                    return 'String';
-                case 'number':
-                    return 'Double';
-                case 'boolean':
-                    return 'Boolean';
-                case 'bigint':
-                    return 'Long';
-                case 'null':
-                case 'undefined':
-                    return 'Unit';
+            return convertedTypes[0];
+        }
+
+        if (uniqueTypes.length === 2) {
+            if (uniqueTypes.includes('undefined') || uniqueTypes.includes('null')) {
+                return `${uniqueTypes.find(t => t !== 'undefined' && t !== 'null')}?` || dynamicType;
             }
         }
 
-        return 'dynamic';
+        const finalType = uniqueTypes.join(' | ');
+        if (types[finalType]) return types[finalType];
+
+        return `${dynamicType} /* ${finalType} */`;
     }
 
     // Handle arrow functions
@@ -263,7 +291,7 @@ export function convertToKotlinType(originalType: string): string {
             const [_, paramType] = param.split(":").map(s => s.trim());
             return convertToKotlinType(paramType || "Any");
         });
-        return `(${paramList.join(", ")}) -> ${convertToKotlinType(returnType.trim())}`;
+        return `(${paramList.join(", ")}) -> ${convertToKotlinType(returnType.trim(), strict, noDynamic)}`;
     }
 
     // Handle literals
@@ -277,12 +305,12 @@ export function convertToKotlinType(originalType: string): string {
 
     // Inline object types
     if (type.startsWith('{') && type.endsWith('}')) {
-        return `Map<String, Any> /* ${type} */`;
+        return `${dynamicType} /* ${type} */`;
     }
 
     // Modularized names without generics
     if (type.includes('.') && !type.includes('<')) {
-        return convertToKotlinType(type.split('.').pop()!);
+        return convertToKotlinType(type.split('.').pop()!, strict, noDynamic);
     }
 
     // Handle array suffixes (e.g., string[][])
@@ -292,28 +320,56 @@ export function convertToKotlinType(originalType: string): string {
         type = type.slice(0, -2).trim();
     }
 
+    // Handle array types with specified length (e.g. [string, number])
+    if (type.startsWith('[') && type.endsWith(']')) {
+        const innerTypes = type.slice(1, -1).split(',').map(t => t.trim());
+        const convertedInnerTypes = innerTypes.map(t => convertToKotlinType(t, strict, noDynamic));
+        const uniqueInnerTypes = convertedInnerTypes.filter((t, index) => convertedInnerTypes.indexOf(t) === index);
+
+        if (uniqueInnerTypes.length === 1) {
+            return `Array<${uniqueInnerTypes[0]}>`;
+        }
+
+        return `Array<${dynamicType}> /* ${type} */`;
+    }
+
+    // Indexed access types (e.g., string['key'])
+    if (type.includes('[') && type.includes(']')) {
+        return `${dynamicType} /* ${type} */`;
+    }
+
     // Handle generic types
     const generic = extractGenericParts(type);
     let baseType: string;
     if (generic) {
         const [baseRaw, argsRaw] = generic;
         let base = types[baseRaw.trim()] ?? baseRaw.trim();
-        
+
         // Handle modularized names
         if (base.includes('.')) {
             base = base.split('.').pop()!;
         }
 
-        const args = splitGenerics(argsRaw).map(arg => convertToKotlinType(arg));
-        baseType = `${base}<${args.join(', ')}>`;
+        const args = splitGenerics(argsRaw).map(arg => convertToKotlinType(arg, strict, noDynamic));
+
+        // Handle inner types
+        if (innerTypes.includes(base) && args.length == 1) {
+            baseType = args[0];
+        } else {
+            baseType = `${base}<${args.join(', ')}>`;
+        }
     } else {
         baseType = types[type] ?? type;
+
+        // Handle object types
+        if (type.startsWith('{') && type.endsWith('}'))
+            baseType = `${dynamicType} /* ${type} */`;
     }
 
     // Wrap in array if needed
     for (let i = 0; i < arrayDepth; i++) {
         baseType = `Array<${baseType}>`;
     }
-
+    
     return baseType;
 }

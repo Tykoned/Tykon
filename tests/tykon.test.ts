@@ -1,12 +1,13 @@
 import * as fs from 'fs'
 import { Project } from "ts-morph"
 import { tykonFromSource } from '../src/generator'
-
-const project = new Project()
-project.addSourceFilesAtPaths('tests/*.d.ts')
-project.addSourceFilesAtPaths('node_modules/@cloudflare/workers-types/index.d.ts')
+import { generateKotlinProject } from '../src/gradle'
 
 describe('Tykon Generator', () => {
+    const project = new Project()
+    project.addSourceFilesAtPaths('tests/*.d.ts')
+    project.addSourceFilesAtPaths('node_modules/@cloudflare/workers-types/index.d.ts')
+
     beforeAll(() => {
         if (!fs.existsSync('tests/out')) {
             fs.mkdirSync('tests/out')
@@ -19,11 +20,15 @@ describe('Tykon Generator', () => {
             package: 'com.example',
             imports: ['kotlin.collections.List']
         }, source)
-        expect(result.size).toBe(1)
+        expect(result.size).toBe(2)
 
-        const first = result.values().next().value
-        console.log(first)
-        fs.writeFileSync('tests/out/example.d.kt', first)
+        if (!fs.existsSync('tests/out/example')) {
+            fs.mkdirSync('tests/out/example', { recursive: true })
+        }
+
+        for (const [name, content] of result) {
+            fs.writeFileSync(`tests/out/example/${name}`, content)
+        }
     })
 
     test('@cloudflare/workers-types', () => {
@@ -42,5 +47,46 @@ describe('Tykon Generator', () => {
         for (const [name, content] of result) {
             fs.writeFileSync(`tests/out/cloudflare-workers/${name}`, content)
         }
+    })
+})
+
+describe('Gradle Project Generation', () => {
+    const project = new Project()
+    project.addSourceFilesAtPaths('node_modules/@cloudflare/workers-types/index.d.ts')
+
+    beforeAll(() => {
+        if (!fs.existsSync('tests/gradle-out')) {
+            fs.mkdirSync('tests/gradle-out')
+        }
+    })
+
+    test('@cloudflare/workers-types', () => {
+        generateKotlinProject(
+            project, 
+            'com.cloudflare.workers',
+            'Cloudflare Workers Types',
+            '@cloudflare/workers-types', 
+            '1.0.0', 
+            '2.1.21', 
+            'tests/gradle-out',
+            [
+                '"org.jetbrains.kotlin-wrappers:kotlin-web:2025.6.0"',
+            ],
+            [
+                'js.serialization.*',
+                'js.iterable.*',
+                'kotlin.js.*',
+                'org.khronos.webgl.*',
+                'org.w3c.dom.*',
+                'org.w3c.dom.events.*',
+                'org.w3c.fetch.*',
+                'org.w3c.files.*',
+                'org.w3c.workers.*',
+                'org.w3c.xhr.*',
+                'web.abort.*',
+                'web.crypto.*',
+                'web.streams.*',
+            ]
+        )
     })
 })

@@ -1,0 +1,60 @@
+plugins {
+    kotlin("multiplatform") version "2.1.21"
+
+    `maven-publish`
+    signing
+}
+
+group = "{{groupId}}"
+version = "{{npmPackageVersion}}"
+description = "{{description}}"
+
+repositories {
+    mavenCentral()
+    mavenLocal()
+}
+
+kotlin {
+    withSourcesJar()
+
+    js {
+        nodejs()
+        binaries.library()
+        generateTypeScriptDefinitions()
+    }
+
+    sourceSets {
+        jsMain.dependencies {
+            implementation(npm("{{npmPackageName}}", "{{npmPackageVersion}}"))
+            {{dependencies}}
+        }
+    }
+}
+
+signing {
+    val signingKey: String? by project
+    val signingPassword: String? by project
+
+    if (signingKey != null && signingPassword != null) {
+        useInMemoryPgpKeys(signingKey, signingPassword)
+        sign(publishing.publications)
+    }
+}
+
+publishing {
+    repositories {
+        if (project.hasProperty("publishing.enabled") && project.property("publishing.enabled") == "true") {
+            maven {
+                name = project.property("publishing.name") as String
+                url = uri(project.property("publishing.url") as String)
+
+                if (project.hasProperty("publishing.username") && project.hasProperty("publishing.password")) {
+                    credentials {
+                        username = project.property("publishing.username") as String
+                        password = project.property("publishing.password") as String
+                    }
+                }
+            }
+        }
+    }  
+}
