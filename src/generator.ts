@@ -119,7 +119,11 @@ function createMethods(declaration: ClassDeclaration | InterfaceDeclaration, con
             return `${paramName}: ${paramType}${isOptional}`;
         }).join(', ');
 
-        const typeParams = method.getTypeParameters();
+        const typeParams = method.getTypeParameters().filter(tp => {
+            const def = tp.getDefault();
+            return !(def && def.getText() === "never");
+        });
+
         const generics = typeParams.length > 0
             ? `<${typeParams.map(tp => tp.getName()).join(', ')}> `
             : '';
@@ -242,8 +246,13 @@ function generateFunction(declaration: FunctionDeclaration, config: TykonConfig)
 
         return `${paramName}: ${paramType}${isOptional}`;
     }).join(', ');
-    const generics = declaration.getTypeParameters().length > 0
-        ? `<${declaration.getTypeParameters().map(tp => tp.getName()).join(', ')}> `
+
+    const typeParams = declaration.getTypeParameters().filter(tp => {
+        const def = tp.getDefault();
+        return !(def && def.getText() === "never");
+    });
+    const generics = typeParams.length > 0
+        ? `<${typeParams.map(tp => tp.getName()).join(', ')}> `
         : '';
 
     output += `${utils.getJsDoc(declaration, nl)}external fun ${generics}${name}(${params})${returnTypeSuffix}${nl}${nl}`;
@@ -274,7 +283,10 @@ function generateClass(declaration: ClassDeclaration, config: TykonConfig): stri
     const modifiers = declaration.isAbstract() ? 'abstract ' : 'open ';
 
     // Handle class type parameters
-    const typeParams = declaration.getTypeParameters();
+    const typeParams = declaration.getTypeParameters().filter(tp => {
+        const def = tp.getDefault();
+        return !(def && def.getText() === "never");
+    });
     let generics = "";
     let constraints: string[] = [];
 
@@ -423,6 +435,7 @@ const typeAliases: string[] = []
 
 function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfig): string {
     if (!declaration.isAmbient()) throw new Error("Only ambient type aliases are supported");
+    let output = "";
 
     const nl = config.newLine || '\n';
     const indent = config.tabs ? '\t'.repeat(config.tabs) : ' '.repeat(config.spaces || 4);
@@ -433,7 +446,10 @@ function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfi
 
     const type = utils.findType(declaration.getType());
     const typeText = type.getText();
-    const typeParams = declaration.getTypeParameters();
+    const typeParams = declaration.getTypeParameters().filter(tp => {
+        const def = tp.getDefault();
+        return !(def && def.getText() === "never");
+    });
     
     const generics = typeParams.length > 0 ? `<${typeParams.map(tp => tp.getName()).join(', ')}>` : '';
     const constraints: string[] = [];
@@ -544,21 +560,27 @@ function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfi
                     typeAliases.push(`${doc}typealias ${name}${generics} = ${kotlinTrueType}${whereClause}${nl}${nl}`);
                     return "";
                 } else {
-                    // Different types, fallback to Any
-                    typeAliases.push(`${doc}typealias ${name}${generics} = Any${whereClause}${nl}${nl}`);
-                    return "";
+                    // Different types, fallback to empty interface
+                    output = `${doc}external interface ${name}${generics}${whereClause}${nl}`;
                 }
             }
         } else {
-            // Fallback if we can't parse the conditional type node
-            typeAliases.push(`${doc}typealias ${name}${generics} = Any${whereClause}${nl}${nl}`);
+            // Fallback to empty interface if can't parse conditional type
+            output = `${doc}external interface ${name}${generics}${whereClause}${nl}`;
             return "";
         }
     }
 
-    // If it's a union or something not object-like, fallback to typealias with Any
+    // If it's a union or something not object-like, fallback to typealias or blank interface
     if (!type.isObject() || type.isUnion()) {
-        typeAliases.push(`${doc}typealias ${name}${generics} = ${utils.convertToKotlinType(typeText, true, true)}${nl}${nl}`);
+        const convertedType = utils.convertToKotlinType(typeText, true, true);
+        if (convertedType.startsWith('dynamic') || convertedType.startsWith('Any')) {
+            // If the type is dynamic or Any, make a blank interface
+            output = `${doc}external interface ${name}${generics}${whereClause} ${nl}`;
+            return output;
+        }
+
+        typeAliases.push(`${doc}typealias ${name}${generics} = ${convertedType}${nl}${nl}`);
         return ""; // Skip object type alias generation because of external file
     }
 
@@ -578,7 +600,7 @@ function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfi
     const properties = type.getProperties();
 
     // Convert to Kotlin interface
-    let output = `${doc}external interface ${name}${generics} {${nl}`;
+    output = `${doc}external interface ${name}${generics} {${nl}`;
     for (const prop of properties) {
         const declarations = prop.getDeclarations();
         const propDecl = declarations[0];
@@ -597,7 +619,7 @@ function generateTypeAlias(declaration: TypeAliasDeclaration, config: TykonConfi
     output += `}${nl}${nl}`;
     
     // Add Creator Methods
-    typeAliases.push(`fun ${generics ? generics + ' ' : ''}${name}(apply: ${name}${generics}.() -> Unit = {}): ${name}${generics}${whereClause} = js("{}").apply(apply)${nl}${nl}`);
+    typeAliases.push(`fun ${generics ? generics + ' ' : ''}${name}(apply: ${name}${generics}.() -> Unit = {}): ${name}${generics}${whereClause} { val obj = js("{}"); apply(obj); return obj } ${nl}${nl}`);
     return output;
 }
 

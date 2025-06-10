@@ -15,7 +15,6 @@ const specialNames = [
     "continue",
     "switch",
     "case",
-    "default",
     "throw",
     "try",
     "catch",
@@ -46,6 +45,8 @@ export function findName(declaration: NameableNodeSpecific | NamedNodeSpecificBa
             if (resolved) {
                 return resolved;
             }
+
+            return `__${name}`; // mark as private
         }
 
         // Handle special names that are in quotes
@@ -320,8 +321,13 @@ export function convertToKotlinType(originalType: string, strict: boolean = fals
         const [_, params, returnType] = fnMatch;
         const paramList = splitGenerics(params).map(param => {
             const [_, paramType] = param.split(":").map(s => s.trim());
-            return convertToKotlinType(paramType || "Any");
-        });
+            const type = convertToKotlinType(paramType || "Any");
+
+            // Filter out Nothing
+            if (type === 'Nothing') return null;
+
+            return type;
+        }).filter(Boolean);
         return `(${paramList.join(", ")}) -> ${convertToKotlinType(returnType.trim(), strict, noDynamic)}`;
     }
 
@@ -381,11 +387,22 @@ export function convertToKotlinType(originalType: string, strict: boolean = fals
             base = base.split('.').pop()!;
         }
 
-        const args = splitGenerics(argsRaw).map(arg => convertToKotlinType(arg, strict, noDynamic));
+        const args = splitGenerics(argsRaw).map(arg => {
+            const type = convertToKotlinType(arg, strict, noDynamic)
+
+            // Filter out nothing
+            if (type === 'Nothing') return null;
+
+            return type;
+        }).filter(Boolean);
+
+        if (args.length === 0) {
+            return base; // No generics, just return the base type
+        }
 
         // Handle inner types
         if (innerTypes.includes(base) && args.length == 1) {
-            baseType = args[0];
+            baseType = args[0] ?? dynamicType;
         } else {
             baseType = `${base}<${args.join(', ')}>`;
         }
