@@ -1,0 +1,15 @@
+.vscode/
+.config/
+bun.lock
+package.json
+package-lock.json
+LICENSE
+tsconfig.json
+.github/
+.devcontainer/
+.wrangler/
+.idea/
+tests/out/
+tests/gradle-out/
+coverage/
+*.log

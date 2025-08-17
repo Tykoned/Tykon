@@ -6,9 +6,12 @@
   "author": "gmitch215",
   "license": "MIT",
   "scripts": {
+    "prettier": "bunx prettier --write .",
+    "prettier:check": "bunx prettier --check .",
     "test": "jest",
-    "test-log": "jest --logHeapUsage --detectOpenHandles > jest.log",
-    "doc": "bunx typedoc src/index.ts --entryPointStrategy Expand src --out docs --plugin typedoc-github-theme --excludePrivate --excludeProtected"
+    "test:log": "jest --logHeapUsage --detectOpenHandles > jest.log",
+    "doc": "bunx typedoc src/index.ts --entryPointStrategy Expand src --out docs --plugin typedoc-github-theme --excludePrivate --excludeProtected",
+    "prepare": "husky install"
   },
   "bin": "dist/index.js",
   "devDependencies": {
@@ -21,6 +24,8 @@
     "@types/jest": "^29.5.14",
     "babel-jest": "^29.7.0",
     "jest": "^29.7.0",
+    "prettier": "^3.6.2",
+    "prettier-plugin-organize-imports": "4.1.0",
     "typedoc-github-theme": "^0.3.0"
   },
   "peerDependencies": {
@@ -28,7 +33,9 @@
   },
   "dependencies": {
     "commander": "^14.0.0",
-    "ts-morph": "^26.0.0",
-    "tykon": "file:"
+    "ts-morph": "^26.0.0"
+  },
+  "lint-staged": {
+    "*.{js,css,md}": "prettier --write"
   }
 }
