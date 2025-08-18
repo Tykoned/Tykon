@@ -23,19 +23,23 @@ const settingsGradleKts = (npmPackageName: string): string => {
 	return `rootProject.name = "${npmPackageName.includes('/') ? npmPackageName.split('/')[1] : npmPackageName}"`;
 };
 
-const gradleProperties =
-	'org.gradle.daemon=true\n' +
-	'org.gradle.jvmargs=-Xmx2g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8\n' +
-	'kotlin.incremental=true\n' +
-	'org.gradle.parallel=true\n' +
-	'org.gradle.cache=true';
+const defGradleProperties = {
+	'org.gradle.daemon': 'true',
+	'org.gradle.jvmargs': '-Xmx2g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8',
+	'kotlin.incremental': 'true',
+	'org.gradle.parallel': 'true',
+	'org.gradle.cache': 'true',
+	'org.jetbrains.dokka.experimental.gradle.pluginMode': 'V2Enabled',
+	'org.jetbrains.dokka.experimental.gradle.pluginMode.noWarn': 'true'
+};
 
 /**
  * Exports a Kotlin project structure with Gradle build files and Kotlin source files generated from TypeScript definitions.
  * @param project The TypeScript project containing the source files to convert.
  * @param groupId The group ID for the Kotlin project, typically in reverse domain name format (e.g., `com.example`).
+ * @param description A brief description of the Kotlin project.
  * @param npmPackageName The name of the npm package, which will be used as the project name.
- * @param npmPackageVersion The version of the npm package, which will be used in the project.
+ * @param npmPackageVersion The version of the npm package, which will also be used as the project version.
  * @param kotlinVersion The version of Kotlin to use in the project. Defaults to '2.1.21'.
  * @param outputDir The directory where the Kotlin project will be generated. Defaults to the npm package name.
  * @param dependencies An array of dependencies to include in the Gradle build file.
@@ -49,10 +53,11 @@ export function generateKotlinProject(
 	description: string,
 	npmPackageName: string,
 	npmPackageVersion: string,
-	kotlinVersion: string = '2.1.21',
+	kotlinVersion: string = '2.2.0',
 	outputDir: string = npmPackageName,
 	dependencies: string[] = [],
-	imports: string[] = []
+	imports: string[] = [],
+	gradleProperties: Record<string, string> = {}
 ) {
 	let buildGradleContent = buildGradleKts(groupId, description, kotlinVersion, npmPackageName, npmPackageVersion);
 	if (dependencies.length > 0) {
@@ -70,7 +75,14 @@ export function generateKotlinProject(
 
 	fs.writeFileSync(`${outputDir}/build.gradle.kts`, buildGradleContent);
 	fs.writeFileSync(`${outputDir}/settings.gradle.kts`, settingsGradleContent);
-	fs.writeFileSync(`${outputDir}/gradle.properties`, gradleProperties);
+
+	const allGradleProperties = { ...defGradleProperties, ...gradleProperties };
+	let gradlePropertiesContent = '';
+	for (const [key, value] of Object.entries(allGradleProperties)) {
+		gradlePropertiesContent += `${key}=${value}\n`;
+	}
+
+	fs.writeFileSync(`${outputDir}/gradle.properties`, gradlePropertiesContent);
 
 	fs.cpSync('src/gradle-template', outputDir, { recursive: true });
 

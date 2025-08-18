@@ -1,5 +1,7 @@
 plugins {
-    kotlin("multiplatform") version "2.1.21"
+    kotlin("multiplatform") version "{{kotlinVersion}}"
+    id("org.jetbrains.dokka") version "2.0.0"
+    id("com.vanniktech.maven.publish") version "0.34.0"
 
     `maven-publish`
     signing
@@ -45,7 +47,7 @@ publishing {
     repositories {
         if (project.hasProperty("publishing.enabled") && project.property("publishing.enabled") == "true") {
             maven {
-                name = project.property("publishing.name") as String
+                name = project.findProperty("publishing.name") as? String ?: "{{npmPackageName}}".replace("[^A-Za-z0-9_\\-.]".toRegex(), "")
                 url = uri(project.property("publishing.url") as String)
 
                 if (project.hasProperty("publishing.username") && project.hasProperty("publishing.password")) {
@@ -57,4 +59,13 @@ publishing {
             }
         }
     }  
+}
+
+if (project.hasProperty("publishing.enabled.central") && project.property("publishing.enabled.central") == "true") {
+    mavenPublishing {
+        coordinates(project.group.toString(), project.name, project.version.toString())
+
+        publishToMavenCentral(true)
+        signAllPublications()
+    }
 }

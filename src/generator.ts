@@ -18,6 +18,21 @@ import {
 import { TykonConfig } from './config';
 import * as utils from './utils';
 
+// Global name index to coordinate cross-module deduplication/merging per source file
+type GlobalNameIndex = {
+	classNames: Set<string>;
+	interfacesByName: Map<string, InterfaceDeclaration[]>;
+	interfaceOwner: Map<string, string>; // name -> ownerId ('root' or module name)
+	aliasNames: Set<string>;
+	aliasOwner: Map<string, string>;
+};
+let GLOBAL_NAME_INDEX: GlobalNameIndex | null = null;
+function getOwnerId(container: StatementedNode): string {
+	if (Node.isModuleDeclaration(container as any)) return (container as ModuleDeclaration).getName();
+	if (Node.isSourceFile(container as any)) return 'root';
+	return 'unknown';
+}
+
 // Generator Utilities
 
 function getParentProperties(declaration: ClassDeclaration | InterfaceDeclaration) {
@@ -46,16 +61,18 @@ function getParentProperties(declaration: ClassDeclaration | InterfaceDeclaratio
 	return parentProperties;
 }
 
-function createProperties(declaration: ClassDeclaration | InterfaceDeclaration, config: TykonConfig): string {
+function createProperties(declaration: ClassDeclaration | InterfaceDeclaration, config: TykonConfig, propsOverride?: any[]): string {
 	let output = '';
 	const nl = config.newLine || '\n';
 	const indent = config.tabs ? '\t'.repeat(config.tabs) : ' '.repeat(config.spaces || 4);
 
-	for (const prop of declaration.getProperties()) {
-		// Skip static properties
-		if (prop.getModifiers().some((mod) => mod.getText() === 'static')) continue;
+	const props: any[] = propsOverride ?? ((declaration as any).getProperties() as any[]);
 
-		const type = prop.isReadonly() ? 'val' : 'var';
+	for (const prop of props) {
+		// Skip static properties (class fields only)
+		if (Node.isPropertyDeclaration(prop) && prop.getModifiers().some((mod) => mod.getText() === 'static')) continue;
+
+		const type = (prop as any).isReadonly() ? 'val' : 'var';
 		const propName = utils.findName(prop);
 		if (propName.startsWith('__') || propName.startsWith('$')) continue; // Skip private properties (convention)
 
@@ -67,10 +84,10 @@ function createProperties(declaration: ClassDeclaration | InterfaceDeclaration, 
 			override = 'override ';
 		}
 
-		const tsType = utils.findType(prop.getType());
-		const jsDoc = utils.getJsDoc(prop, nl, indent);
+		const tsType = utils.findType((prop as any).getType());
+		const jsDoc = utils.getJsDoc(prop as any, nl, indent);
 
-		if (prop.getTypeNode() && prop.getTypeNode()!.getKind() === SyntaxKind.TypeQuery) {
+		if ((prop as any).getTypeNode && (prop as any).getTypeNode() && (prop as any).getTypeNode()!.getKind() === SyntaxKind.TypeQuery) {
 			// Property is an inner type query
 			continue;
 		}
@@ -91,7 +108,7 @@ function createProperties(declaration: ClassDeclaration | InterfaceDeclaration, 
 
 const overrideMethods = ['toString', 'equals', 'hashCode'];
 
-function createMethods(declaration: ClassDeclaration | InterfaceDeclaration, config: TykonConfig): string {
+function createMethods(declaration: ClassDeclaration | InterfaceDeclaration, config: TykonConfig, methodsOverride?: any[]): string {
 	let output = '';
 	const nl = config.newLine || '\n';
 	const indent = config.tabs ? '\t'.repeat(config.tabs) : ' '.repeat(config.spaces || 4);
@@ -101,7 +118,9 @@ function createMethods(declaration: ClassDeclaration | InterfaceDeclaration, con
 		returnSuffix: string;
 	}[] = [];
 
-	for (const method of declaration.getMethods()) {
+	const methods: any[] = methodsOverride ?? ((declaration as any).getMethods() as any[]);
+
+	for (const method of methods) {
 		// Skip static methods
 		if (method instanceof ModifierableNode && (method as ModifierableNode).getModifiers().some((mod) => mod.getText() === 'static'))
 			continue;
@@ -110,37 +129,37 @@ function createMethods(declaration: ClassDeclaration | InterfaceDeclaration, con
 		if (methodName.startsWith('__') || methodName.startsWith('$')) continue; // Skip private methods (convention)
 		if (methodName.startsWith('[') || methodName.endsWith(']')) continue; // Skip index signatures
 
-		let override = overrideMethods.includes(methodName) && method.getParameters().length == 0 ? 'override ' : '';
+		let override = overrideMethods.includes(methodName) && (method as any).getParameters().length == 0 ? 'override ' : '';
 		// Check parents for override
 		const parent = declaration.getParent();
 		if (parent instanceof ClassDeclaration || parent instanceof InterfaceDeclaration) {
-			const parentMethods = parent.getMethods().filter((m) => utils.findName(m) === methodName);
+			const parentMethods = (parent as any).getMethods().filter((m: any) => utils.findName(m) === methodName);
 			if (parentMethods.length > 0) override = 'override ';
 		}
 
-		const returnType = utils.convertToKotlinType(utils.findType(method.getReturnType()).getText());
+		const returnType = utils.convertToKotlinType(utils.findType((method as any).getReturnType()).getText());
 		const returnTypeSuffix = returnType === 'Unit' ? '' : `: ${returnType}`;
 
-		const params = method
+		const params = (method as any)
 			.getParameters()
-			.map((param) => {
+			.map((param: any) => {
 				const paramName = utils.findName(param);
 				const paramType = utils.convertToKotlinType(utils.findType(param.getType()).getText());
-				const isOptional = param.isOptional() ? '? = definedExternally' : '';
+				const isOptional = (param as any).isOptional?.() ? '? = definedExternally' : '';
 
 				return `${paramName}: ${paramType}${isOptional}`;
 			})
 			.join(', ');
 
-		const typeParams = method.getTypeParameters().filter((tp) => {
+		const typeParams = (method as any).getTypeParameters().filter((tp: any) => {
 			const def = tp.getDefault();
 			return !(def && def.getText() === 'never');
 		});
 
-		const generics = typeParams.length > 0 ? `<${typeParams.map((tp) => tp.getName()).join(', ')}> ` : '';
+		const generics = typeParams.length > 0 ? `<${typeParams.map((tp: any) => tp.getName()).join(', ')}> ` : '';
 
 		const constraints: string[] = [];
-		for (const tp of typeParams) {
+		for (const tp of typeParams as any[]) {
 			const constraint = tp.getConstraint();
 			if (constraint) {
 				const type = utils.convertToKotlinType(constraint.getText(), false, true);
@@ -150,7 +169,7 @@ function createMethods(declaration: ClassDeclaration | InterfaceDeclaration, con
 			}
 		}
 		const whereClause = constraints.length > 0 ? ` where ${constraints.join(', ')}` : '';
-		const jsDoc = utils.getJsDoc(method, nl, indent);
+		const jsDoc = utils.getJsDoc(method as any, nl, indent);
 
 		methodOutput.push({
 			method: `${jsDoc}${indent}${override}fun ${generics}${methodName}(${params})`,
@@ -198,6 +217,7 @@ function createStaticProperties(declaration: ClassDeclaration, config: TykonConf
 		const tsType = utils.findType(prop.getType());
 		const propType = utils.convertToKotlinType(tsType.getText());
 		const isOptional = tsType.isNullable() ? '?' : '';
+
 		const jsDoc = utils.getJsDoc(prop, nl, indent.repeat(2));
 
 		output += `${jsDoc}${indent}${indent}val ${propName}: ${propType}${isOptional}${nl}${nl}`;
@@ -210,10 +230,10 @@ function createStaticProperties(declaration: ClassDeclaration, config: TykonConf
 		const returnType = utils.convertToKotlinType(utils.findType(method.getReturnType()).getText());
 		const params = method
 			.getParameters()
-			.map((param) => {
+			.map((param: any) => {
 				const paramName = utils.findName(param);
 				const paramType = utils.convertToKotlinType(utils.findType(param.getType()).getText());
-				const isOptional = param.isOptional() ? '? = definedExternally' : '';
+				const isOptional = (param as any).isOptional?.() ? '? = definedExternally' : '';
 
 				return `${paramName}: ${paramType}${isOptional}`;
 			})
@@ -262,20 +282,20 @@ function generateFunction(declaration: FunctionDeclaration, config: TykonConfig)
 
 	const params = declaration
 		.getParameters()
-		.map((param) => {
+		.map((param: any) => {
 			const paramName = utils.findName(param);
 			const paramType = utils.convertToKotlinType(utils.findType(param.getType()).getText());
-			const isOptional = param.isOptional() ? '? = definedExternally' : '';
+			const isOptional = (param as any).isOptional?.() ? '? = definedExternally' : '';
 
 			return `${paramName}: ${paramType}${isOptional}`;
 		})
 		.join(', ');
 
-	const typeParams = declaration.getTypeParameters().filter((tp) => {
+	const typeParams = declaration.getTypeParameters().filter((tp: any) => {
 		const def = tp.getDefault();
 		return !(def && def.getText() === 'never');
 	});
-	const generics = typeParams.length > 0 ? `<${typeParams.map((tp) => tp.getName()).join(', ')}> ` : '';
+	const generics = typeParams.length > 0 ? `<${typeParams.map((tp: any) => tp.getName()).join(', ')}> ` : '';
 
 	output += `${utils.getJsDoc(declaration, nl)}external fun ${generics}${name}(${params})${returnTypeSuffix}${nl}${nl}`;
 
@@ -349,7 +369,7 @@ function generateClass(declaration: ClassDeclaration, config: TykonConfig): stri
 	for (const constructor of declaration.getConstructors()) {
 		const params = constructor
 			.getParameters()
-			.map((param) => {
+			.map((param: any) => {
 				const paramName = param.getName();
 				const tsType = utils.findType(param.getType());
 				const paramType = utils.convertToKotlinType(tsType.getText());
@@ -363,11 +383,31 @@ function generateClass(declaration: ClassDeclaration, config: TykonConfig): stri
 		output += `${jsDoc}${indent}constructor(${params})${nl}${nl}`;
 	}
 
-	// Add class properties
-	output += createProperties(declaration, config);
+	// Merge same-named interface declarations into the class (class + interface), across the entire source file
+	const classPropNames = new Set(declaration.getProperties().map((p) => utils.findName(p)));
+	const mergedIfaces: InterfaceDeclaration[] = (GLOBAL_NAME_INDEX?.interfacesByName.get(name) || []).filter((i) => i.isAmbient());
+	const extraIfaceProps: any[] = [];
+	const seenExtraProp = new Set<string>();
+	for (const i of mergedIfaces) {
+		for (const p of i.getProperties()) {
+			const n = utils.findName(p);
+			if (classPropNames.has(n)) continue;
+			if (seenExtraProp.has(n)) continue;
+			seenExtraProp.add(n);
+			extraIfaceProps.push(p);
+		}
+	}
+	const mergedPropsList = [...(declaration.getProperties() as any[]), ...extraIfaceProps];
 
-	// Add the class methods
-	output += createMethods(declaration, config);
+	// Add class properties (including merged interface props)
+	output += createProperties(declaration, config, mergedPropsList);
+
+	// Methods: merge class and interface methods
+	const ifaceMethods = mergedIfaces.flatMap((i) => i.getMethods());
+	const mergedMethodsList: any[] = [...(declaration.getMethods() as any[]), ...(ifaceMethods as any[])];
+
+	// Add the class methods (including merged interface methods)
+	output += createMethods(declaration, config, mergedMethodsList);
 
 	// Add static properties and methods
 	if (declaration.getStaticProperties().length > 0 || declaration.getStaticMethods().length > 0) {
@@ -389,15 +429,31 @@ function generateInterface(declaration: InterfaceDeclaration, config: TykonConfi
 	if (doNotExpose.includes(name)) return ''; // Skip classes that should not be exposed
 	if (name.startsWith('__') || name.startsWith('$')) return ''; // Skip private classes (convention)
 
-	// Handle interface type parameters
+	// Handle interface type parameters - merge across all interface declarations with the same name
 	let typeParams: TypeParameterDeclaration[] = [];
 	const symbol = declaration.getSymbol();
+	let canonDeclarations: InterfaceDeclaration[] = [declaration];
 	if (symbol) {
-		const canonDeclarations = symbol.getDeclarations().filter(Node.isInterfaceDeclaration);
+		const cand = symbol.getDeclarations().filter(Node.isInterfaceDeclaration) as InterfaceDeclaration[];
+		if (cand.length > 0) canonDeclarations = cand;
 		for (const canonDeclaration of canonDeclarations) {
 			const existingNames = new Set(typeParams.map((tp) => tp.getName()));
 			const canonicalParams = canonDeclaration.getTypeParameters().filter((tp) => !existingNames.has(tp.getName()));
 			typeParams.push(...canonicalParams);
+		}
+	}
+	// Also merge in interfaces of the same name from other modules/files in this source
+	const extraIfaces = (GLOBAL_NAME_INDEX?.interfacesByName.get(name) || []).filter((i) => !canonDeclarations.includes(i));
+	if (extraIfaces.length > 0) {
+		const seenDecl = new Set<string>(canonDeclarations.map((d) => d.getSourceFile().getFilePath() + ':' + d.getStart()));
+		for (const extra of extraIfaces) {
+			const key = extra.getSourceFile().getFilePath() + ':' + extra.getStart();
+			if (seenDecl.has(key)) continue;
+			seenDecl.add(key);
+			canonDeclarations.push(extra);
+			for (const tp of extra.getTypeParameters()) {
+				if (!typeParams.some((p) => p.getName() === tp.getName())) typeParams.push(tp);
+			}
 		}
 	}
 
@@ -417,18 +473,23 @@ function generateInterface(declaration: InterfaceDeclaration, config: TykonConfi
 		}
 	}
 
-	// Handle interface inheritance
-	const parents = declaration.getExtends().filter((p) => {
-		const type = p.getType().getSymbol();
-		if (!type) return false; // Skip if no type symbol found
+	// Handle interface inheritance - merge extends across declarations
+	const parentExtendSet = new Map<string, any>();
+	for (const d of canonDeclarations) {
+		for (const p of d.getExtends()) {
+			const type = p.getType().getSymbol();
+			if (!type) continue; // Skip if no type symbol found
 
-		const name = type.getName();
-		if (name.startsWith('__')) return false; // Skip private interfaces (convention)
-		if (name === 'Error') return false;
+			const pname = type.getName();
+			if (pname.startsWith('__')) continue; // Skip private interfaces (convention)
+			if (pname === 'Error') continue;
 
-		return type && type.getDeclarations().filter((d) => Node.isInterfaceDeclaration(d)).length == type.getDeclarations().length;
-	});
-	const parent0 = parents.length > 0 ? ` : ${parents.map((p) => p.getText()).join(', ')}` : '';
+			if (type && type.getDeclarations().filter((dd) => Node.isInterfaceDeclaration(dd)).length == type.getDeclarations().length) {
+				parentExtendSet.set(p.getText(), p);
+			}
+		}
+	}
+	const parent0 = parentExtendSet.size > 0 ? ` : ${Array.from(parentExtendSet.keys()).join(', ')}` : '';
 
 	// Implement where clause for type parameters
 	let whereClause = '';
@@ -438,11 +499,30 @@ function generateInterface(declaration: InterfaceDeclaration, config: TykonConfi
 
 	output += `${utils.getJsDoc(declaration, nl)}external interface ${name}${generics}${parent0}${whereClause} {${nl}`;
 
+	// Merge interface properties across declarations
+	const mergedProps: any[] = [];
+	const seenPropNames = new Set<string>();
+	for (const d of canonDeclarations) {
+		for (const p of d.getProperties()) {
+			const propName = utils.findName(p);
+			if (propName.startsWith('__') || propName.startsWith('$')) continue;
+			if (seenPropNames.has(propName)) continue;
+			seenPropNames.add(propName);
+			mergedProps.push(p);
+		}
+	}
+
+	// Merge interface methods across declarations
+	const mergedMethods: any[] = [];
+	for (const d of canonDeclarations) {
+		mergedMethods.push(...(d.getMethods() as any[]));
+	}
+
 	// Add interface properties
-	output += createProperties(declaration, config);
+	output += createProperties(declaration, config, mergedProps);
 
 	// Add interface methods
-	output += createMethods(declaration, config);
+	output += createMethods(declaration, config, mergedMethods);
 
 	output += '}' + nl;
 
@@ -681,13 +761,28 @@ function tykon(config: TykonConfig, source: StatementedNode): string {
 		output += generateClass(clazz, config);
 	}
 
-	// interfaces
+	// interfaces - emit each merged name only once globally and skip any that have a class with same name anywhere
+	const ownerId = getOwnerId(source);
+	const processedInterfaces = new Set<string>();
 	for (const iface of source.getInterfaces().filter((i) => i.isAmbient())) {
+		const n = utils.findName(iface);
+		if (GLOBAL_NAME_INDEX?.classNames.has(n)) continue; // class + interface => class only (global)
+		if (processedInterfaces.has(n)) continue; // avoid duplicates within the same container
+		const owner = GLOBAL_NAME_INDEX?.interfaceOwner.get(n);
+		if (owner && owner !== ownerId) continue; // only the chosen owner emits this interface
+		processedInterfaces.add(n);
 		output += generateInterface(iface, config);
 	}
 
 	// types
 	for (const typeAlias of source.getTypeAliases().filter((t) => t.isAmbient())) {
+		const n = utils.findName(typeAlias);
+		// Skip if a class with the same name exists anywhere
+		if (GLOBAL_NAME_INDEX?.classNames.has(n)) continue;
+		// Emit only from the chosen owner to avoid redeclarations across modules
+		const ownerId = getOwnerId(source);
+		const chosen = GLOBAL_NAME_INDEX?.aliasOwner.get(n);
+		if (chosen && chosen !== ownerId) continue;
 		output += generateTypeAlias(typeAlias, config);
 	}
 
@@ -756,6 +851,51 @@ export function tykonFromSource(config: TykonConfig, sourceFile: SourceFile): Ma
 	let outputs = new Map<string, string>();
 	const nl = config.newLine || '\n';
 
+	// Initialize global name index for this source file
+	(function buildGlobalIndex() {
+		const classNames = new Set<string>();
+		const interfacesByName = new Map<string, InterfaceDeclaration[]>();
+		const interfaceOwner = new Map<string, string>();
+		const interfaceOwnersList = new Map<string, string[]>();
+		const aliasNames = new Set<string>();
+		const aliasOwner = new Map<string, string>();
+		const aliasOwnersList = new Map<string, string[]>();
+
+		const modules = sourceFile.getModules();
+		const containers: StatementedNode[] = [...modules, sourceFile];
+		for (const container of containers) {
+			const ownerId = getOwnerId(container);
+			for (const c of container.getClasses().filter((cc) => cc.isAmbient())) {
+				classNames.add(utils.findName(c));
+			}
+			for (const i of container.getInterfaces().filter((ii) => ii.isAmbient())) {
+				const n = utils.findName(i);
+				const arr = interfacesByName.get(n) || [];
+				arr.push(i);
+				interfacesByName.set(n, arr);
+				const owners = interfaceOwnersList.get(n) || [];
+				if (!owners.includes(ownerId)) owners.push(ownerId);
+				interfaceOwnersList.set(n, owners);
+			}
+			for (const a of container.getTypeAliases().filter((aa) => aa.isAmbient())) {
+				const n = utils.findName(a);
+				aliasNames.add(n);
+				const owners = aliasOwnersList.get(n) || [];
+				if (!owners.includes(ownerId)) owners.push(ownerId);
+				aliasOwnersList.set(n, owners);
+			}
+		}
+		for (const [name, owners] of interfaceOwnersList.entries()) {
+			const chosen = owners.includes('root') ? 'root' : owners[0];
+			interfaceOwner.set(name, chosen);
+		}
+		for (const [name, owners] of aliasOwnersList.entries()) {
+			const chosen = owners.includes('root') ? 'root' : owners[0];
+			aliasOwner.set(name, chosen);
+		}
+		GLOBAL_NAME_INDEX = { classNames, interfacesByName, interfaceOwner, aliasNames, aliasOwner };
+	})();
+
 	const rootModule =
 		config.module ||
 		sourceFile
@@ -789,11 +929,24 @@ export function tykonFromSource(config: TykonConfig, sourceFile: SourceFile): Ma
 
 			for (const imp of config.imports) {
 				const imp0 = imp.trim();
-				if (!imp0) continue; // Skip empty imports
+				if (!imp0) continue;
 				output += `import ${imp0}${nl}`;
 			}
+			output += nl;
 
 			for (const statement of topLevelStatements) {
+				if (Node.isInterfaceDeclaration(statement)) {
+					const n = utils.findName(statement);
+					if (GLOBAL_NAME_INDEX?.classNames.has(n)) continue; // class takes precedence globally
+					const chosen = GLOBAL_NAME_INDEX?.interfaceOwner.get(n);
+					if (chosen && chosen !== 'root') continue; // only emit in chosen owner
+				}
+				if (Node.isTypeAliasDeclaration(statement)) {
+					const n = utils.findName(statement);
+					if (GLOBAL_NAME_INDEX?.classNames.has(n)) continue; // skip alias if class exists
+					const chosen = GLOBAL_NAME_INDEX?.aliasOwner.get(n);
+					if (chosen && chosen !== 'root') continue; // only emit in chosen owner
+				}
 				output += generateStatement(statement, config);
 			}
 

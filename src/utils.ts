@@ -94,10 +94,6 @@ export function findType(type: Type): Type {
 	return type;
 }
 
-const tagNameConversions: Record<string, string> = {
-	returns: 'return'
-};
-
 /**
  * Generates JSDoc comments for a given declaration.
  * @param declaration The declaration to generate JSDoc for.
@@ -112,11 +108,12 @@ export function getJsDoc(declaration: JSDocableNode, nl: string, indent: string 
 			const tags = doc
 				.getTags()
 				.map((tag) => {
-					const tagName = tag.getTagName();
-					const convertedTagName = tagNameConversions[tagName] || tagName;
+					const text = tag.getText(false) || 'No description provided.';
+					if (text.startsWith('@returns')) {
+						return `@return ${text.replace('@returns', '')}`;
+					}
 
-					const tagText = tag.getCommentText() || 'No description provided.';
-					return `@${convertedTagName} ${tagText}`;
+					return text;
 				})
 				.join(`${nl}${indent} * `);
 

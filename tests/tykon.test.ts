@@ -72,8 +72,8 @@ describe('Gradle Project Generation', () => {
 			'com.cloudflare.workers',
 			'Cloudflare Workers Types',
 			'@cloudflare/workers-types',
-			'1.0.0',
-			'2.1.21',
+			'4.20250816.0',
+			'2.2.0',
 			'tests/gradle-out',
 			['"org.jetbrains.kotlin-wrappers:kotlin-web:2025.6.0"'],
 			[
@@ -91,7 +91,13 @@ describe('Gradle Project Generation', () => {
 				'web.assembly.*',
 				'web.crypto.*',
 				'web.streams.*'
-			]
+			],
+			{
+				'publishing.enabled': 'true',
+				'publishing.url': 'https://maven.pkg.github.com/Tykoned/Tykon',
+				'publishing.username': process.env.GITHUB_USERNAME || '',
+				'publishing.password': process.env.GITHUB_TOKEN || ''
+			}
 		);
 	});
 });
