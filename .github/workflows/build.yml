@@ -31,7 +31,9 @@ jobs:
       - name: Install Dependencies
         run: bun install --frozen-lockfile
       - name: Run Tests
-        run: bun run test:log
+        run: |
+          bun run test:log
+          cat jest.log
       - name: Build Generated Project
         run: |
           cd tests/gradle-out
