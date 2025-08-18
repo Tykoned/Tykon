@@ -1,5 +1,5 @@
 {
-  "name": "@gmitch215/tykon",
+  "name": "@tykoned/tykon",
   "description": "Generate Kotlin Source Files from TypeScript Definitions",
   "type": "module",
   "version": "1.0.0",
