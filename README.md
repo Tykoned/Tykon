@@ -254,7 +254,7 @@ Built-in support for publishing to:
 
 Control via gradle.properties:
 
-```properties
+```txt
 publishing.enabled=true
 publishing.url=https://my-repo.com/maven
 publishing.username=myuser

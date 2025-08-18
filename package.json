@@ -10,7 +10,7 @@
     "prettier:check": "bunx prettier --check .",
     "test": "jest",
     "test:log": "jest --logHeapUsage --detectOpenHandles > jest.log",
-    "doc": "bunx typedoc src/index.ts --entryPointStrategy Expand src --out docs --plugin typedoc-github-theme --excludePrivate --excludeProtected",
+    "doc": "bunx typedoc --options typedoc.json",
     "prepare": "husky install"
   },
   "bin": "dist/index.js",

@@ -1,0 +1,9 @@
+{
+	"entryPointStrategy": "expand",
+	"entryPoints": ["src/config.ts", "src/generator.ts", "src/gradle.ts", "src/utils.ts"],
+	"plugin": ["typedoc-github-theme"],
+	"excludePrivate": true,
+	"excludeProtected": true,
+	"excludeInternal": true,
+	"out": "./docs"
+}

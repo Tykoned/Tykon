@@ -240,7 +240,7 @@ function extractGenericParts(type: string): [string, string] | null {
 
 /**
  * Converts a TypeScript type to a Kotlin type.
- * @param type The TypeScript type to convert.
+ * @param originalType The TypeScript type to convert.
  * @param strict Whether to never return a new type.
  * @param noDynamic Whether to never return a dynamic type.
  * @returns The corresponding Kotlin type as a string.
