@@ -18,10 +18,31 @@ jobs:
       discussions: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install Dependencies
+        run: |
+          bun install --global husky
+          bun install --frozen-lockfile
+      - name: Verify Tests
+        run: bun run test --coverage
+      - name: Build Project
+        run: bun run build
+      - name: Publish to NPM
+        if: success() || failure()
+        run: bun publish --registry https://registry.npmjs.org
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to GitHub Packages
+        if: success() || failure()
+        run: bun publish --registry https://npm.pkg.github.com
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Extract Version from package.json
         id: get_version
         run: |
@@ -29,6 +50,7 @@ jobs:
           echo "Extracted Version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       - name: Retrieve Latest Tag
+        if: ${{ github.event.inputs.changelog == '' }}
         id: latest_tag
         run: echo "LATEST_TAG=$(git describe --tags --abbrev=0)" >> $GITHUB_ENV
       - name: Generate Changelog
@@ -39,7 +61,7 @@ jobs:
           configuration: ".github/release.json"
           mode: "HYBRID"
           fromTag: "${{ env.LATEST_TAG }}"
-          toTag: "master"
+          toTag: "${{ github.ref_name}}"
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -47,4 +69,4 @@ jobs:
           name: cmakekt v${{ env.VERSION }}
           body: ${{ steps.changelog.outputs.changelog || github.event.inputs.changelog }}
           draft: false
-          prerelease: false
+          prerelease: ${{ github.ref_name != 'master' }}
