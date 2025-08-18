@@ -8,3 +8,4 @@ docs/
 jest.log
 tests/out/
 tests/gradle-out/
+coverage/

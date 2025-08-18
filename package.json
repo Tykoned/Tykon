@@ -2,10 +2,21 @@
   "name": "@tykoned/tykon",
   "description": "Generate Kotlin Source Files from TypeScript Definitions",
   "type": "module",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
   "version": "1.0.0",
   "author": "gmitch215",
   "license": "MIT",
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "build": "bun build src/index.ts --outdir=dist --target=node --format=esm --minify --sourcemap=linked && bunx tsc --project tsconfig.build.json",
     "prettier": "bunx prettier --write .",
     "prettier:check": "bunx prettier --check .",
     "test": "jest",
