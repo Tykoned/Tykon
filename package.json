@@ -3,14 +3,19 @@
   "description": "Generate Kotlin Source Files from TypeScript Definitions",
   "type": "module",
   "module": "dist/index.js",
+  "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "gmitch215",
   "license": "MIT",
   "files": [
     "dist/**/*",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "tsconfig.build.json",
+    "tsconfig.json",
+    "typedoc.json",
+    "src/**/*"
   ],
   "publishConfig": {
     "access": "public"
@@ -24,7 +29,6 @@
     "doc": "bunx typedoc --options typedoc.json",
     "prepare": "husky install"
   },
-  "bin": "dist/index.js",
   "devDependencies": {
     "@babel/core": "^7.27.1",
     "@babel/preset-env": "^7.27.2",
@@ -44,7 +48,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "commander": "^14.0.0",
     "ts-morph": "^26.0.0"
   },
   "lint-staged": {

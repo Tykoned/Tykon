@@ -2,7 +2,7 @@
   <h1>🚀 Tykon</h1>
   <p><strong>Transform TypeScript declarations into beautiful Kotlin/JS externals</strong></p>
   
-  [![npm version](https://img.shields.io/npm/v/tykon)](https://www.npmjs.com/package/@gmitch215/tykon)
+  [![npm version](https://img.shields.io/npm/v/tykon)](https://www.npmjs.com/package/@tykoned/tykon)
   [![License](https://img.shields.io/github/license/Tykoned/Tykon)](LICENSE)
 </div>
 
