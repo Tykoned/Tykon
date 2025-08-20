@@ -2,12 +2,13 @@
     "compilerOptions": {
         "lib": ["ESNext"],
         "target": "ESNext",
-        "moduleResolution": "node10",
+        "module": "es2022",
+        "allowSyntheticDefaultImports": true,
+        "moduleResolution": "node",
         "moduleDetection": "auto",
         "strict": true,
         "skipLibCheck": true,
-        "rootDir": "src",
         "outDir": "dist" 
     },
-    "include": ["src"]
+    "include": ["src", "tests"]
 }

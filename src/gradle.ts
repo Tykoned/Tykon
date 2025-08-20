@@ -2,6 +2,19 @@ import * as fs from 'fs';
 import { Project } from 'ts-morph';
 import { tykonFromSource } from './generator';
 
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+function resolve(url: string) {
+	const __dirname = path.dirname(fileURLToPath(import.meta.url));
+	return fs.readFileSync(path.join(__dirname, url), 'utf8');
+}
+
+function copy(from: string, to: string) {
+	const __dirname = path.dirname(fileURLToPath(import.meta.url));
+	fs.cpSync(path.join(__dirname, from), to, { recursive: true });
+}
+
 const buildGradleKts = (
 	groupId: string,
 	description: string,
@@ -9,7 +22,7 @@ const buildGradleKts = (
 	npmPackageName: string,
 	npmPackageVersion: string
 ): string => {
-	const template = fs.readFileSync('src/templates/build.gradle.kts.template', 'utf-8');
+	const template = resolve('templates/build.gradle.kts.template');
 
 	return template
 		.replace(/{{groupId}}/g, groupId)
@@ -84,7 +97,7 @@ export function generateKotlinProject(
 
 	fs.writeFileSync(`${outputDir}/gradle.properties`, gradlePropertiesContent);
 
-	fs.cpSync('src/gradle-template', outputDir, { recursive: true });
+	copy('gradle-template', outputDir);
 
 	const folder = groupId.replace(/\./g, '/');
 	if (!fs.existsSync(`${outputDir}/src/jsMain/kotlin/${folder}`)) {
