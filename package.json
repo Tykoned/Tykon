@@ -5,7 +5,7 @@
   "module": "dist/index.js",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "gmitch215",
   "license": "MIT",
   "files": [
@@ -38,10 +38,12 @@
     "@types/bun": "latest",
     "@types/jest": "^29.5.14",
     "babel-jest": "^29.7.0",
+    "babel-plugin-transform-import-meta": "^2.3.3",
     "husky": "^9.1.7",
     "jest": "^29.7.0",
     "prettier": "^3.6.2",
     "prettier-plugin-organize-imports": "4.1.0",
+    "ts-jest": "^29.4.1",
     "typedoc-github-theme": "^0.3.0"
   },
   "peerDependencies": {
