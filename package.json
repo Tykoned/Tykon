@@ -2,10 +2,9 @@
   "name": "@tykoned/tykon",
   "description": "Generate Kotlin Source Files from TypeScript Definitions",
   "type": "module",
-  "module": "dist/index.js",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "version": "1.0.4",
+  "module": "src/index.ts",
+  "main": "src/index.ts",
+  "version": "1.0.5",
   "author": "gmitch215",
   "license": "MIT",
   "files": [
