@@ -9,10 +9,8 @@
   "author": "gmitch215",
   "license": "MIT",
   "files": [
-    "dist/**/*",
     "README.md",
     "LICENSE",
-    "tsconfig.build.json",
     "tsconfig.json",
     "typedoc.json",
     "src/**/*"
@@ -21,7 +19,6 @@
     "access": "public"
   },
   "scripts": {
-    "build": "bun build src/index.ts --outdir=dist --target=node --format=esm --minify --sourcemap=linked && bunx tsc --project tsconfig.build.json",
     "prettier": "bunx prettier --write .",
     "prettier:check": "bunx prettier --check .",
     "test": "jest",
