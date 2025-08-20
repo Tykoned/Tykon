@@ -5,24 +5,33 @@ import { tykonFromSource } from './generator';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-function resolve(url: string) {
-	const __dirname = path.dirname(fileURLToPath(import.meta.url));
-	return fs.readFileSync(path.join(__dirname, url), 'utf8');
+function resolve(rootDir: string, url: string) {
+	const src = path.join(rootDir, url);
+	if (!fs.existsSync(src)) {
+		throw new Error(`File ${src} does not exist.`);
+	}
+
+	return fs.readFileSync(src, 'utf8');
 }
 
-function copy(from: string, to: string) {
-	const __dirname = path.dirname(fileURLToPath(import.meta.url));
-	fs.cpSync(path.join(__dirname, from), to, { recursive: true });
+function copy(rootDir: string, from: string, to: string) {
+	const src = path.join(rootDir, from);
+	if (!fs.existsSync(src)) {
+		throw new Error(`Directory ${src} does not exist.`);
+	}
+
+	fs.cpSync(src, to, { recursive: true });
 }
 
 const buildGradleKts = (
+	rootDir: string,
 	groupId: string,
 	description: string,
 	kotlinVersion: string,
 	npmPackageName: string,
 	npmPackageVersion: string
 ): string => {
-	const template = resolve('templates/build.gradle.kts.template');
+	const template = resolve(rootDir, 'templates/build.gradle.kts.template');
 
 	return template
 		.replace(/{{groupId}}/g, groupId)
@@ -59,6 +68,7 @@ const defGradleProperties = {
  * Each dependency should be a string in the format `group:name:version`.
  * You must include the quotes if you are citing a maven dependency, or you can use the `npm(npmPackageName, npmPackageVersion)` format for npm packages.
  * @param imports An array of Kotlin imports to include in the generated source files.
+ * @param rootDir The root directory to search for files
  */
 export function generateKotlinProject(
 	project: Project,
@@ -66,28 +76,33 @@ export function generateKotlinProject(
 	description: string,
 	npmPackageName: string,
 	npmPackageVersion: string,
-	kotlinVersion: string = '2.2.0',
+	kotlinVersion: string = '2.2.10',
 	outputDir: string = npmPackageName,
 	dependencies: string[] = [],
 	imports: string[] = [],
-	gradleProperties: Record<string, string> = {}
+	gradleProperties: Record<string, string> = {},
+	rootDir: string = path.dirname(fileURLToPath(import.meta.url))
 ) {
-	let buildGradleContent = buildGradleKts(groupId, description, kotlinVersion, npmPackageName, npmPackageVersion);
+	let buildGradleContent = buildGradleKts(rootDir, groupId, description, kotlinVersion, npmPackageName, npmPackageVersion);
 	if (dependencies.length > 0) {
 		const dependenciesBlock = dependencies.map((dep) => `implementation(${dep})`).join('\n');
 		buildGradleContent = buildGradleContent.replace(/{{dependencies}}/g, dependenciesBlock);
 	} else {
 		buildGradleContent = buildGradleContent.replace(/{{dependencies}}/g, '');
 	}
+	console.debug('[TK] Generated build.gradle.kts content:', buildGradleContent);
 
 	const settingsGradleContent = settingsGradleKts(npmPackageName);
 
 	if (!fs.existsSync(outputDir)) {
 		fs.mkdirSync(outputDir, { recursive: true });
+		console.debug(`[TK] Created output directory: ${outputDir}`);
 	}
+	console.warn(`[TK] Output directory ${outputDir} already exists, replacing existing files`);
 
 	fs.writeFileSync(`${outputDir}/build.gradle.kts`, buildGradleContent);
 	fs.writeFileSync(`${outputDir}/settings.gradle.kts`, settingsGradleContent);
+	console.debug(`[TK] Wrote gradle build and settings to ${outputDir}`);
 
 	const allGradleProperties = { ...defGradleProperties, ...gradleProperties };
 	let gradlePropertiesContent = '';
@@ -96,8 +111,10 @@ export function generateKotlinProject(
 	}
 
 	fs.writeFileSync(`${outputDir}/gradle.properties`, gradlePropertiesContent);
+	console.debug(`[TK] Wrote gradle properties to ${outputDir}/gradle.properties`);
 
-	copy('gradle-template', outputDir);
+	copy(rootDir, 'gradle-template', outputDir);
+	console.debug(`[TK] Copied gradle template files to ${outputDir}/gradle`);
 
 	const folder = groupId.replace(/\./g, '/');
 	if (!fs.existsSync(`${outputDir}/src/jsMain/kotlin/${folder}`)) {
@@ -118,8 +135,9 @@ export function generateKotlinProject(
 
 		for (const [name, content] of result) {
 			fs.writeFileSync(`${outputDir}/src/jsMain/kotlin/${folder}/${name}`, content);
+			console.debug(`[TK] Wrote ${name} to ${outputDir}/src/jsMain/kotlin/${folder}`);
 		}
 	}
 
-	console.log(`Kotlin project generated in ${outputDir}`);
+	console.log(`[TK] Kotlin project generated in ${outputDir}`);
 }
